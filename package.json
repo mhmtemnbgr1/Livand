@@ -1,0 +1,18 @@
+{
+  "name": "ofis",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Claude Code, Codex ve Antigravity CLI ile çalışan çoklu ajan sanal ofis",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "start": "node server.js",
+    "app": "node launcher.mjs",
+    "electron": "node electron/run.mjs",
+    "test": "node --test test/*.test.mjs",
+    "shots": "electron tools/screenshots.cjs"
+  },
+  "devDependencies": {
+    "electron": "44.4.5"
+  }
+}
