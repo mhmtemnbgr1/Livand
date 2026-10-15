@@ -201,7 +201,7 @@ function chooseProvider(agentId, cat, need = {}) {
 }
 
 // ---------- Varsayılan ajanlar ----------
-const READ = 'Read,Glob,Grep', WEB = 'WebSearch,WebFetch';
+const READ = 'Read,Glob,Grep', WEB = 'WebSearch,WebFetch', SELF_SHOT = 'mcp__ofis__screenshot';   // SELF_SHOT: approver.js'teki ekran görüntüsü aracı (onaysız)
 const ASSET_TOOL = path.join(__dir, 'tools', 'assets.mjs');   // ajanların görsel/asset aracı (onay beklemeden çalışır)
 const SHOT_TOOL = path.join(__dir, 'tools', 'shot.cjs'), SHOTS = path.join(DATA, 'shots');
 const SNAPS = path.join(DATA, 'snaps'), SNAP_MAX_BYTES = 50 * 1024 * 1024, SNAP_KEEP = 20;   // görev başına anlık görüntüler (geri alma)   // görsel doğrulama: ekran görüntüleri uygulamanın veri klasöründe
@@ -557,8 +557,8 @@ async function ask(p, agentId, prompt, { purpose = 'görev', phase = 'text', mod
     (phase === 'plan' ? `\nBu aşamada hiçbir dosyayı değiştirme; sadece araştır ve planla.` : '') +
     (phase !== 'text' ? `\nGÜVENLİK: Sadece çalışma klasöründeki dosyalarla çalış. Kullanıcı izni olmadan bu klasörün dışındaki hiçbir dosyayı/klasörü okuma, yazma veya listeleme; gerekiyorsa izin iste. Paket kurmadan önce gerçekten gerekli mi düşün, yerleşik yolları tercih et.` : '');
   const cfg = phase === 'text' ? { tools: '', allow: [], turns: 1, mode: 'default', model: model || (agentId === 'ceo' ? a.model : 'haiku') }
-    : phase === 'plan' ? { tools: `${READ},${WEB}`, allow: WEB.split(','), turns: turns || a.turns, mode: 'default', model: model || a.model }
-    : { tools: [...new Set([...a.tools.split(','), ...extraTools])].filter(Boolean).join(','), allow: a.tools.split(',').filter(t => /^(WebSearch|WebFetch)$/.test(t)), turns: turns || a.turns, mode: 'acceptEdits', model: model || a.model };
+    : phase === 'plan' ? { tools: `${READ},${WEB}`, allow: [...WEB.split(','), SELF_SHOT], turns: turns || a.turns, mode: 'default', model: model || a.model }
+    : { tools: [...new Set([...a.tools.split(','), ...extraTools])].filter(Boolean).join(','), allow: [...a.tools.split(',').filter(t => /^(WebSearch|WebFetch)$/.test(t)), SELF_SHOT], turns: turns || a.turns, mode: 'acceptEdits', model: model || a.model };
   // token bütçesi: dolduysa plan/iş çağrıları durur (ders çıkarma gibi kısa metin çağrıları açık kalır)
   if (p && p.budget && (p.spent || 0) >= p.budget && phase !== 'text') {
     if (!p.cancelled) { p.cancelled = true; post(p, 'ceo', 'user', `Token bütçesi doldu (${p.spent}/${p.budget}). Devam etmek için bütçeyi artırıp "Devam et"e bas.`, { budgetWarn: 1 }); emit('notify', { kind: 'budget', text: 'Token bütçesi doldu' }); }
@@ -638,7 +638,7 @@ async function runTask(p, t, brief, deps, done) {
   const builderText = t.role === 'yapimci' && !t.kind ? builderPrompt(p, t, deps) : '';
   const prior = t.kind === 'düzeltme' ? Object.values(done).filter(d => d.agent === t.agent && !d.fix && d.body).map(d => cut(d.body, 900)).join('\n---\n') : '';
   const priorText = prior ? `\nÖNCEKİ RAPORUN (bu işi sen yaptın; dosyaları baştan keşfetme, yalnızca kararla ilgili yerleri aç ve düzenle):\n${cut(prior, 1800)}` : '';
-  const turns = t.role === 'yapimci' ? Math.max(S.agents[t.agent].turns || 24, 40) : undefined;   // tüm ürünü yazan yapımcıya daha çok adım
+  const turns = t.role === 'yapimci' ? Math.max(S.agents[t.agent].turns || 24, 60) : undefined;   // tüm ürünü yazan yapımcıya daha çok adım (ekran görüntüsüne bakıp düzeltmek de adım harcar)
   let r = await ask(p, t.agent, base + builderText + critText + capText + vText + priorText + askLine + tail, { purpose: cut(t.instruction, 40), phase: 'work', cat, extraTools: xt, turns, provider: t.provider }); add(r);   // yapımcının düzeltmeleri aynı CLI'de kalır
   if (r.error && r.provider && r.provider !== 'claude' && r.subtype !== 'budget' && !p.cancelled && provUsable('claude')) {
     // başka CLI başarısız oldu: bunu öğren (düşük puan) ve görevi Claude Code ile bir kez daha dene
@@ -806,14 +806,33 @@ function entryHtml(dir) {
   const hs = walk(dir, 300).filter(f => /\.html?$/i.test(f)).sort((a, b) => a.split(/[\\/]/).length - b.split(/[\\/]/).length);
   return hs.find(f => /^index\.html?$/i.test(path.basename(f))) || hs[0] || null;
 }
-function screenshots(p, tag) {
-  const html = entryHtml(wsDir(p));
+// page: çalışma klasörüne göre göreli sayfa yolu (boşsa giriş sayfası); klasör dışına çıkamaz
+function screenshots(p, tag, page) {
+  const dir = wsDir(p);
+  let html = entryHtml(dir);
+  if (page) { const f = path.resolve(dir, String(page).replace(/^[\\/]+/, '')); html = f.toLowerCase().startsWith(dir.toLowerCase() + path.sep) && /\.html?$/i.test(f) && fs.existsSync(f) ? f : null; }
   if (!html || !ELECTRON || (FORCE_DEMO && !process.env.OFIS_SHOTS)) return Promise.resolve(null);
   const out = path.join(SHOTS, p.id, tag); fs.rmSync(out, { recursive: true, force: true });
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
-  return new Promise(resolve => execFile(ELECTRON, [SHOT_TOOL, html, out], { env, windowsHide: true, timeout: 60000 }, () => {
-    try { const r = JSON.parse(fs.readFileSync(path.join(out, 'sonuc.json'), 'utf8')); resolve(r.error ? null : { page: path.relative(wsDir(p), html).replace(/\\/g, '/'), shots: (r.shots || []).map(x => path.basename(x)), dir: out, errors: r.errors || [] }); } catch { resolve(null); }
+  return new Promise(resolve => execFile(ELECTRON, [SHOT_TOOL, html, out], { env, windowsHide: true, timeout: 100000 }, () => {
+    try { const r = JSON.parse(fs.readFileSync(path.join(out, 'sonuc.json'), 'utf8')); resolve(r.error ? null : { page: path.relative(dir, html).replace(/\\/g, '/'), shots: (r.shots || []).map(x => path.basename(x)), dir: out, errors: r.errors || [], warnings: r.warnings || [], pages: r.pages || {} }); } catch { resolve(null); }
   }));
+}
+// ekran görüntüsü dilimlerinin açıklaması: "masaüstü 3 dilim (2400px), mobil 4 dilim (3300px)"
+const shotPlan = v => Object.entries(v.pages || {}).map(([k, x]) => `${k === 'mobil' ? 'mobil' : 'masaüstü'} ${x.tiles} dilim (${x.height}px${x.truncated ? ', sayfanın sonu kesildi' : ''})`).join(', ');
+// yapımcının kendi aracı (approver.js → mcp__ofis__screenshot): sayfayı tam sayfa çeker, dosya yollarını ve tarayıcı sorunlarını döndürür
+let selfShotN = 0;
+async function selfShot({ project, agent, page }) {
+  const p = S.projects.find(x => x.id === project); if (!p) return { text: 'Proje bulunamadı.' };
+  if (!ELECTRON) return { text: 'Ekran görüntüsü alınamıyor: Electron bulunamadı (npm install).' };
+  const pdir = path.join(SHOTS, p.id);
+  try { const old = fs.readdirSync(pdir).filter(x => x.startsWith('oz-')).sort(); for (const x of old.slice(0, Math.max(0, old.length - 3))) fs.rmSync(path.join(pdir, x), { recursive: true, force: true }); } catch {}
+  logEv(p, agent, 'tool', 'Sayfanın ekran görüntüsünü alıyor');
+  const v = await screenshots(p, `oz-${Date.now()}-${++selfShotN}`, page);
+  if (!v) return { text: page ? `Sayfa bulunamadı ya da açılamadı: ${page} (çalışma klasörüne göre göreli bir .html yolu ver).` : 'Çalışma klasöründe açılacak bir .html sayfası yok ya da sayfa açılamadı.' };
+  return { text: `${v.page} gizli tarayıcıda açıldı; fontlar ve görseller yüklendikten sonra tam sayfa çekildi: ${shotPlan(v)}.\n` +
+    `Her dilim bir ekran yüksekliği; sırayla Read ile aç ve gerçekten gördüğünü değerlendir:\n${v.shots.map(x => path.join(v.dir, x)).join('\n')}\n` +
+    `TARAYICI: ${v.errors.length ? v.errors.map(e => '\n- ' + e).join('') : 'konsol hatası yok, yatay taşma yok.'}${v.warnings.length ? '\nUYARI: ' + v.warnings.join(' | ') : ''}` };
 }
 async function verifyProject(p, tag) {
   const checks = checkWorkspace(wsDir(p)), visual = await screenshots(p, tag);
@@ -821,7 +840,7 @@ async function verifyProject(p, tag) {
   logEv(p, 'auditor', 'task', `Otomatik doğrulama: ${checks.errors} hata, ${checks.warnings} uyarı${visual ? `, tarayıcıda ${visual.errors.length} sorun` : ''}`);
   save(); emit('project', p); return p.verify;
 }
-const verifyText = v => !v ? '' : checksText(v.checks) + (v.visual ? `\nTARAYICI KONTROLÜ (${v.visual.page} gizli tarayıcıda açıldı): ${v.visual.errors.length ? v.visual.errors.map(e => '\n- ' + e).join('') : 'konsol hatası yok, yatay taşma yok.'}\nEKRAN GÖRÜNTÜLERİ (Read ile aç ve masaüstü/mobil görünümü değerlendir): ${v.visual.shots.map(x => path.join(v.visual.dir, x)).join(' , ')}` : '');
+const verifyText = v => !v ? '' : checksText(v.checks) + (v.visual ? `\nTARAYICI KONTROLÜ (${v.visual.page} gizli tarayıcıda açıldı): ${v.visual.errors.length ? v.visual.errors.map(e => '\n- ' + e).join('') : 'konsol hatası yok, yatay taşma yok.'}\nEKRAN GÖRÜNTÜLERİ (tam sayfa, fontlar yüklü; ${shotPlan(v.visual)}; sırayla Read ile aç ve masaüstü/mobil görünümü baştan sona değerlendir): ${v.visual.shots.map(x => path.join(v.visual.dir, x)).join(' , ')}` : '');
 // dosyanın sorumlusu: o dosyayı teslim eden görevin ajanı; yoksa dosya türüne göre
 function ownerOfFile(p, file) {
   const ok = k => S.agents[k] && !['ceo', 'auditor'].includes(k) && !S.agents[k].external;
@@ -939,11 +958,13 @@ function productFilesText(p) {
   for (const f of walk(dir, 200).filter(x => /\.(html?|css|m?js|json|svg)$/i.test(x))) { if (total > 30000) break; let t; try { t = fs.readFileSync(f, 'utf8'); } catch { continue; } const r = `=== ${path.relative(dir, f).replace(/\\/g, '/')} ===\n${cut(t, 30000 - total)}\n`; out += r; total += r.length; }
   return out;
 }
+const SHOT_HINT = `"${SELF_SHOT}" aracın varsa onu çağır (sayfayı tam sayfa, fontlar yüklü masaüstü+mobil çeker) ve dönen PNG dilimlerini Read ile açıp gerçekten gör.`;
 function builderPrompt(p, t, deps) {
   const ins = inputDocs(p, deps), dsk = S.agents.designer ? skillsPrompt(pickSkills('designer', S.agents.designer, `${t.instruction} ${p.brief || ''}`, 2)) : '';
   return `\nYAPIMCI_GOREVI: Bu ürünün TEK yazarı sensin; tasarımı da kodla birlikte sen yapıyorsun — usta bir ürün tasarımcısı-geliştirici gibi çalış. Başka kimse ürün dosyalarına yazmayacak; ekip girdi hazırladı ve sonra ekran görüntülerine bakarak gözden geçirecek.` +
     `\n- Önce girdileri ve vizyondaki tarz/yapıyı oku. Görsel yönü (renk paleti, tipografi ölçeği, boşluk, köşe, gölge) CSS değişkenleriyle kur ve ürünün tamamına tutarlı uygula; sıradan şablon görünümünden kaçın, net bir görsel hiyerarşi kur.` +
     `\n- Girdilerdeki gerçek içeriği kullan; yer tutucu bırakma. Mobilde ve masaüstünde düzgün görünsün; etkileşimler çalışsın.` +
+    `\n- GÖREREK ÇALIŞ: ${SHOT_HINT} İlk çalışan taslaktan hemen sonra ve her büyük görsel değişiklikten sonra sayfaya bak; gördüğün sorunları (hiyerarşi, boşluk, hizalama, kontrast, taşma, mobil düzen, boş/kırık bölüm) düzelt ve tekrar bak. Kodu okuyarak "iyi görünüyordur" deme.` +
     `\n- Bitirmeden önce dosyalarını yeniden aç ve kabul ölçütlerini tek tek kontrol et.` +
     `\n- Yanıtının sonunda (---ÖZ--- satırından önce) "---KARARLAR---" başlığı altında verdiğin örtük kararları madde madde yaz: palet, yazı tipleri, yerleşim, dosya yapısı, önemli etkileşimler. Ekip bunlara göre değerlendirecek.` +
     (ins ? `\nGİRDİLER (ekibin hazırladığı belgeler, tam metin — özet değil):\n${ins}` : '') + (dsk ? '\n(Tasarım becerileri de senin)' + dsk : '');
@@ -994,7 +1015,7 @@ async function buildLoop(p, done, rounds, runOne) {
     const ft = { id: `d${round}`, agent: builder, kind: 'düzeltme', role: 'yapimci', needs: [], provider: bt0.provider && provUsable(bt0.provider) ? bt0.provider : undefined, caps: bt0.caps || [], criteria: bt0.criteria || [], deliverable: bt0.deliverable,
       instruction: `GERI_BILDIRIM_TRIYAJ (tur ${round}): Gözden geçirenler ürünün hakkında şunları söyledi. Her maddeye kullanıcının isteği, vizyon ve kendi kararların açısından bak: kullanıcıya fayda sağlıyorsa UYGULA; isteğe ters, kapsam dışı ya da yanlışsa gerekçesiyle REDDET — körü körüne her şeyi uygulama.\n` +
         items.map(x => `${x.no}. [${x.onem}] (${x.from}) ${x.text}`).join('\n') +
-        `\nKabul ettiklerini dosyalarında düzelt (yalnızca ilgili yerleri). Yanıtının sonunda (---ÖZ--- satırından önce) "---TRİYAJ---" başlığı altında her madde için tek satır yaz: "1: uygulandı — ne yaptın" ya da "2: reddedildi — gerekçe". Kararların değiştiyse "---KARARLAR---" altında güncel listeyi yaz.` };
+        `\nKabul ettiklerini dosyalarında düzelt (yalnızca ilgili yerleri); görsel düzeltmelerden sonra ${SHOT_HINT} Yanıtının sonunda (---ÖZ--- satırından önce) "---TRİYAJ---" başlığı altında her madde için tek satır yaz: "1: uygulandı — ne yaptın" ya da "2: reddedildi — gerekçe". Kararların değiştiyse "---KARARLAR---" altında güncel listeyi yaz.` };
     p.board.push({ id: ft.id, agent: ft.agent, kind: ft.kind, role: ft.role, caps: ft.caps, criteria: ft.criteria, instruction: `Geri bildirimi süz ve uygula (tur ${round}): ${items.length} madde`, deliverable: ft.deliverable, needs: [], status: 'bekliyor' });
     save(); emit('project', p);
     await runOne(ft);
@@ -1193,6 +1214,7 @@ http.createServer(async (req, res) => {
       if (req.method === 'GET' && parts[1] === 'state') return json(res, publicState());
       if (req.method === 'GET' && parts[1] === 'requests' && parts[2]) { const r = S.requests.find(x => x.id === parts[2]); return r ? json(res, r) : json(res, { error: 'bulunamadı' }, 404); }
       if (req.method === 'POST' && parts[1] === 'approval') { const b = await body(req); return json(res, await requestApproval(b)); }   // approver.js'ten
+      if (req.method === 'POST' && parts[1] === 'self-shot') { const b = await body(req); return json(res, await selfShot(b)); }   // approver.js'ten: ajanın ekran görüntüsü aracı
       if (req.method === 'POST' && parts[1] === 'approvals' && parts[2] === 'bulk') { const b = await body(req); let n = 0; for (const a of [...approvals.values()]) if ((!b.risk || a.risk === b.risk) && (!b.project || a.projectId === b.project)) { a.settle(b.decision === 'allow' ? 'allow' : 'deny', false); n++; } return json(res, { ok: true, n }); }
       if (req.method === 'POST' && parts[1] === 'approvals' && approvals.has(parts[2])) { const b = await body(req); approvals.get(parts[2]).settle(b.decision === 'allow' ? 'allow' : 'deny', !!b.always); return json(res, { ok: true }); }
       if (req.method === 'POST' && parts[1] === 'pick-folder') return json(res, await pickFolder());
@@ -1256,7 +1278,7 @@ http.createServer(async (req, res) => {
         const pages = walk(dir, 300).filter(x => /\.html?$/i.test(x)).map(x => path.relative(dir, x).replace(/\\/g, '/')).slice(0, 30);
         return json(res, { port: PREVIEW_PORT, base: PREVIEW_PORT ? `http://127.0.0.1:${PREVIEW_PORT}/${p.id}/` : null, entry: entry ? path.relative(dir, entry).replace(/\\/g, '/') : null, pages });
       }
-      if (req.method === 'GET' && parts[1] === 'shot' && /^[\w-]+$/.test(parts[2] || '') && /^[\w-]+$/.test(parts[3] || '') && /^(masaustu|mobil)\.png$/.test(parts[4] || '')) {
+      if (req.method === 'GET' && parts[1] === 'shot' && /^[\w-]+$/.test(parts[2] || '') && /^[\w-]+$/.test(parts[3] || '') && /^(masaustu|mobil)(-\d+)?\.png$/.test(parts[4] || '')) {
         const fp = path.join(SHOTS, parts[2], parts[3], parts[4]); if (!fs.existsSync(fp)) { res.writeHead(404); return res.end(); }
         res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'no-cache' }); return res.end(fs.readFileSync(fp));
       }
