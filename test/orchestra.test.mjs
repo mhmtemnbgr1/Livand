@@ -36,13 +36,15 @@ test('ürün işi yoksa ekip modu; tek ürün görevi aynen kalır', () => {
   assert.ok(!isProductTask({ instruction: 'Sayfa metinlerini yaz', deliverable: 'icerik.md' }));
 });
 
-test('gözden geçirenler: tasarım + denetim, yazar varsa metin, bağlı CLI\'ler ikinci görüş', () => {
-  const plan = [{ agent: 'writer' }, { agent: 'developer' }];
-  assert.deepEqual(reviewersFor(plan, AG, () => false).map(r => r.key), ['tasarim', 'denetim', 'metin']);
-  const all = reviewersFor(plan, AG, k => ['codex', 'antigravity'].includes(k));
-  assert.equal(all.length, 4, 'en fazla 4');
-  assert.ok(all.some(r => r.provider === 'codex'));
-  assert.ok(!reviewersFor([{ agent: 'developer' }], AG, () => false).some(r => r.key === 'metin'), 'yazar planda yoksa metin incelemesi yok');
+test('gözden geçirenler: yapımcıdan farklı ajanlar öncelikli; tek ajanlı ofiste aynı CLI temiz bağlamla bakar', () => {
+  const solo = reviewersFor(AG, { builderCli: 'claude', members: ['claude'] });
+  assert.deepEqual(solo.map(r => [r.key, r.provider]), [['denetim', 'claude'], ['tasarim', 'claude']]);
+  const two = reviewersFor(AG, { builderCli: 'claude', members: ['claude', 'codex'] });
+  assert.deepEqual(two.map(r => [r.key, r.provider]), [['denetim', 'codex'], ['tasarim', 'claude']], 'denetim farklı modelde');
+  const three = reviewersFor(AG, { builderCli: 'claude', members: ['claude', 'codex', 'antigravity'] });
+  assert.deepEqual(three.map(r => [r.key, r.provider]), [['denetim', 'codex'], ['tasarim', 'antigravity']]);
+  const cx = reviewersFor(AG, { builderCli: 'codex', members: ['claude', 'codex'] });
+  assert.equal(cx.find(r => r.audit).provider, 'claude', 'Codex yazarsa Claude denetler');
 });
 
 test('bulgu, karar ve triyaj ayrıştırma', () => {

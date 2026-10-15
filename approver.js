@@ -23,7 +23,7 @@ rl.on('line', async line => {
   let m; try { m = JSON.parse(line); } catch { return; }
   if (m.method === 'initialize') return send({ jsonrpc: '2.0', id: m.id, result: { protocolVersion: m.params?.protocolVersion || '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'ofis', version: '1.0.0' } } });
   if (m.method === 'tools/list') return send({ jsonrpc: '2.0', id: m.id, result: { tools: [
-    { name: 'approve', description: 'Handles permission prompts', inputSchema: { type: 'object', properties: { tool_name: { type: 'string' }, input: { type: 'object' }, tool_use_id: { type: 'string' } }, required: ['tool_name', 'input'] } },
+    ...(process.env.OFIS_ONLY_SHOT === '1' ? [] : [{ name: 'approve', description: 'Handles permission prompts', inputSchema: { type: 'object', properties: { tool_name: { type: 'string' }, input: { type: 'object' }, tool_use_id: { type: 'string' } }, required: ['tool_name', 'input'] } }]),   // Codex'te yalnızca ekran görüntüsü aracı
     { name: 'screenshot', description: 'Renders an HTML page from the working folder in a headless browser (waits for network idle, web fonts and images), captures full-page desktop (1280px) and mobile (390px) screenshots as viewport-high slices, and reports console errors and horizontal overflow. Returns PNG file paths: open them with Read to actually see the page.',
       inputSchema: { type: 'object', properties: { page: { type: 'string', description: 'HTML path relative to the working folder; empty = entry page (index.html)' } } } },
   ] } });
@@ -33,6 +33,7 @@ rl.on('line', async line => {
     catch { text = 'Ofis sunucusuna ulaşılamadı; ekran görüntüsü alınamadı.'; }
     return send({ jsonrpc: '2.0', id: m.id, result: { content: [{ type: 'text', text: String(text || 'Ekran görüntüsü alınamadı.') }] } });
   }
+  if (m.method === 'tools/call' && (process.env.OFIS_ONLY_SHOT === '1' || m.params?.name !== 'approve')) return send({ jsonrpc: '2.0', id: m.id, error: { code: -32601, message: 'bilinmeyen araç' } });
   if (m.method === 'tools/call') {
     let out;
     try { out = await postJson('/api/approval', { project: process.env.OFIS_PROJECT, agent: process.env.OFIS_AGENT, ...(m.params?.arguments || {}) }); }

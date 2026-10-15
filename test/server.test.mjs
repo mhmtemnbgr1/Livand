@@ -48,9 +48,12 @@ let S;
 before(async () => { S = startServer(); await S.ready; S.listen(); });
 after(async () => { S.closeSse(); await S.stop(); });
 
-test('durum: varsayılan ajanlar ve ayarlar', async () => {
+test('durum: 3 ajan (CLI), şapkalar, varsayılan ofis ve ayarlar', async () => {
   const { json } = await S.api('state');
-  for (const k of ['ceo', 'designer', 'developer', 'researcher', 'writer', 'auditor']) assert.ok(json.agents[k], k + ' yok');
+  assert.deepEqual(Object.keys(json.agents), ['claude', 'codex', 'antigravity'], 'ajan = CLI');
+  for (const k of ['ceo', 'designer', 'developer', 'researcher', 'writer', 'auditor']) assert.ok(json.hats[k], k + ' şapkası yok');
+  assert.equal(json.offices.length, 1); assert.equal(json.offices[0].lead, 'claude');
+  assert.deepEqual(json.offices[0].members, ['claude', 'codex', 'antigravity']);
   assert.equal(json.settings.lang, 'tr');
   assert.equal(json.live.demo, true);
 });
@@ -92,8 +95,9 @@ test('dış HTTP girdisi: ajan oluşur, durum yayınlanır', async () => {
   const r = await S.api('event', { name: 'GitHub CI', state: 'error', note: 'test kırıldı' });
   assert.equal(r.json.agent, 'ext_githubci');
   const st = (await S.api('state')).json;
-  assert.ok(st.agents.ext_githubci);
-  assert.equal(st.agents.ext_githubci.external, true);
+  assert.ok(st.ext.ext_githubci, 'dış araç ofisin ajanlarına karışmaz');
+  assert.ok(!st.agents.ext_githubci);
+  assert.equal(st.ext.ext_githubci.external, true);
   await waitFor(() => S.events.some(e => e.type === 'status' && e.data.agent === 'ext_githubci' && e.data.state === 'error'), 3000, 100);
   await S.api('event', { name: 'GitHub CI', state: 'blocked' });
   await waitFor(() => S.events.some(e => e.type === 'status' && e.data.agent === 'ext_githubci' && e.data.state === 'waiting'), 3000, 100);
@@ -128,10 +132,13 @@ test('görev akışı: plan → onay → pano → puan → çalıştırma geçmi
   const today = new Date(), key = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
   assert.ok(st.daily[key], 'günlük istatistik yerel tarih anahtarıyla tutulmalı');
   // gelişim: öz değerlendirme ve ölçülebilir dersler kaydedilir, seviye ve yönerge arayüze gider
-  const w = st.agents.writer;
-  assert.ok(w.lessons.some(l => l.src === 'oz'), 'öz değerlendirme dersi');
+  const w = st.hats.writer;
+  assert.ok(w.lessons.some(l => l.src === 'oz'), 'öz değerlendirme dersi (şapkanın)');
   assert.ok(w.lessons.some(l => l.src === 'metrik'), 'ölçülebilir ders');
-  assert.ok(w.level && w.level.tasks >= 1 && w.charter.standards.length, 'seviye ve yönerge');
+  assert.ok(w.charter.standards.length, 'şapkanın yönergesi');
+  assert.ok(st.agents.claude.level.tasks >= 1, 'seviye ajanın (CLI)');
+  assert.ok(done.board.filter(t => !t.kind).every(t => t.cli === 'claude'), 'her görevin ajanı belli');
+  assert.ok(done.messages.some(m => m.from === 'writer' && m.cli === 'claude'), 'mesajda şapkayı takan ajan');
   assert.ok(!done.messages.some(m => /---ÖZ---/.test(m.text)), 'öz satırı sohbete düşmez');
   const sv = (await S.api('state')).json.savings;
   assert.ok(sv && sv.all.tasks + sv.all.skipped >= 2, 'biten işler tasarruf hesabına girer');
@@ -204,9 +211,9 @@ test('ekip içi kalite: akran incelemesi öneri verir, denetçi düzeltme turu a
 
 test('beceriler: ajan kartından açılıp kapatılır, kendi becerisi eklenir ve görevde istem içine girer', { timeout: 120000 }, async () => {
   const st0 = (await S.api('state')).json;
-  assert.ok(st0.agents.writer.skillList.some(s => s.id === 'blog-yazisi' && s.on), 'hazır beceriler arayüze gelir');
-  await S.api('agents/writer', { skillsOff: ['seo-metin', 'yok-boyle-bir-beceri'], customSkills: [{ name: 'Kahve sözlüğü', when: 'kahve', steps: 'Terimleri açıkla\nÖrnek ver' }, { name: '', steps: 'geçersiz' }] });
-  const w = (await waitFor(async () => { const a = (await S.api('state')).json.agents.writer; return a.customSkills?.length && a; }, 5000, 100));
+  assert.ok(st0.hats.writer.skillList.some(s => s.id === 'blog-yazisi' && s.on), 'hazır beceriler arayüze gelir');
+  await S.api('hats/writer', { skillsOff: ['seo-metin', 'yok-boyle-bir-beceri'], customSkills: [{ name: 'Kahve sözlüğü', when: 'kahve', steps: 'Terimleri açıkla\nÖrnek ver' }, { name: '', steps: 'geçersiz' }] });
+  const w = (await waitFor(async () => { const a = (await S.api('state')).json.hats.writer; return a.customSkills?.length && a; }, 5000, 100));
   assert.deepEqual(w.skillsOff, ['seo-metin'], 'bilinmeyen beceri kimliği saklanmaz');
   assert.equal(w.customSkills.length, 1, 'geçersiz beceri atılır');
   assert.equal(w.skillList.find(s => s.id === 'seo-metin').on, false);
@@ -220,7 +227,7 @@ test('beceriler: ajan kartından açılıp kapatılır, kendi becerisi eklenir v
   const rq = st.requests.filter(r => r.projectId === p.id && r.agent === 'writer' && r.phase === 'work').pop();
   const full = (await S.api('requests/' + rq.id)).json;
   assert.match(full.system, /## Kahve sözlüğü/);
-  await S.api('agents/writer', { skillsOff: [], customSkills: [] });   // diğer testleri etkilemesin
+  await S.api('hats/writer', { skillsOff: [], customSkills: [] });   // diğer testleri etkilemesin
 });
 
 test('oyun projesi: CEO yetenek kataloğunu görür, asset hattını tasarımcıya verir, istem aracın yolunu taşır', { timeout: 120000 }, async () => {
@@ -368,19 +375,19 @@ test('proje silme: kayıtlar gider, uygulama klasörü istenirse silinir, son pr
 test('çoklu CLI: ajan Codex\'e atanır, görev Codex ile çalışır ve sonuç öğrenilir', { timeout: 120000 }, async () => {
   let st = (await S.api('state')).json;
   assert.deepEqual(st.providers.map(x => x.key), ['claude', 'codex', 'antigravity']);
-  for (const a of Object.values(st.agents)) if (!a.external) assert.equal(a.provider, 'auto', 'varsayılan: sistem CLI seçer');
+  for (const a of Object.values(st.hats)) assert.equal(a.provider, 'auto', 'varsayılan: ofis/lider seçer');
   assert.equal(st.providers.find(x => x.key === 'codex').usable, false, 'açılmadan kullanılmaz');
   await S.api('settings', { providers: { codex: { on: true, model: 'gpt; kötü' } } });
   st = (await S.api('state')).json;
   const cx = st.providers.find(x => x.key === 'codex');
   assert.equal(cx.on, true); assert.equal(cx.model, '', 'güvensiz model adı temizlenir'); assert.equal(cx.usable, true);
-  await S.api('agents/writer', { provider: 'codex' });
-  await waitFor(async () => (await S.api('state')).json.agents.writer.provider === 'codex', 5000, 100);
+  await S.api('hats/writer', { provider: 'codex' });
+  await waitFor(async () => (await S.api('state')).json.hats.writer.provider === 'codex', 5000, 100);
   const p = (await S.api('projects', { name: 'CLI Testi', brief: 'Çay hakkında yazı', template: 'blog' })).json;
   await S.api(`projects/${p.id}/plan`, { action: 'approve' });
   const done = await waitFor(async () => { const q = (await S.api('state')).json.projects.find(x => x.id === p.id); return q.board?.length && !q.executing && q.board.every(t => t.status === 'bitti') && q; }, 100000, 1000);
   const wt = done.board.find(t => t.agent === 'writer');
-  assert.equal(wt.provider, 'codex'); assert.ok(wt.cat);
+  assert.equal(wt.provider, 'codex'); assert.equal(wt.cli, 'codex'); assert.ok(wt.cat);
   st = (await S.api('state')).json;
   assert.ok(st.routing[wt.cat].est.codex.n >= 1, 'Codex sonucu öğrenildi');
   assert.ok(st.requests.some(r => r.agent === 'writer' && r.provider === 'codex' && /^codex/.test(r.model)));
@@ -392,5 +399,23 @@ test('çoklu CLI: ajan Codex\'e atanır, görev Codex ile çalışır ve sonuç 
   assert.equal(st.providers.find(x => x.key === 'codex').usable, false);
   assert.equal(st.providers.find(x => x.key === 'codex').on, false);
   assert.equal((await S.api('providers/yok/connect', {})).status, 404);
-  await S.api('agents/writer', { provider: 'auto' });
+  await S.api('hats/writer', { provider: 'auto' });
+});
+
+test('ofisler: kurulur, projeler ofise bağlanır, lider üyelerden olur, son ofis silinmez', async () => {
+  const bad = (await S.api('offices', { name: 'Tasarım stüdyosu', lead: 'yok', members: ['codex', 'hayali'] })).json;
+  assert.equal(bad.office.lead, 'codex', 'lider üyelerden'); assert.deepEqual(bad.office.members, ['codex']);
+  const o = bad.office;
+  await S.api('offices/' + o.id, { members: ['claude', 'codex'], lead: 'claude' });
+  let st = (await S.api('state')).json;
+  assert.equal(st.offices.find(x => x.id === o.id).lead, 'claude');
+  const p = (await S.api('projects', { name: 'Stüdyo işi', officeId: o.id })).json;
+  assert.equal(p.officeId, o.id);
+  const q = (await S.api('projects', { name: 'Ofissiz', officeId: 'yok' })).json;
+  assert.equal(q.officeId, st.offices[0].id, 'bilinmeyen ofis → ilk ofis');
+  assert.equal((await S.api('offices/' + o.id + '/delete', {})).json.ok, true);
+  st = (await S.api('state')).json;
+  assert.equal(st.projects.find(x => x.id === p.id).officeId, st.offices[0].id, 'projeler silinmez, ilk ofise taşınır');
+  assert.equal((await S.api('offices/' + st.offices[0].id + '/delete', {})).status, 400, 'son ofis silinemez');
+  for (const x of [p, q]) await S.api('projects/' + x.id + '/delete', { files: true });
 });
