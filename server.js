@@ -559,7 +559,9 @@ function runOther(provider, { agentId, p, prompt, system, phase, cwd, think }) {
       // ekran görüntüsü aracı: ofisin MCP sunucusu yalnızca bu çalıştırma için (-c), kullanıcının ~/.codex ayarı değişmez; onay aracı gizlenir
       const env = { OFIS_URL: `http://127.0.0.1:${PORT}`, OFIS_AGENT: 'codex', OFIS_PROJECT: p?.id || '', OFIS_ONLY_SHOT: '1', ELECTRON_RUN_AS_NODE: '1' };
       args.push('-c', `mcp_servers.ofis.command=${JSON.stringify(process.execPath)}`, '-c', `mcp_servers.ofis.args=${JSON.stringify([path.join(__dir, 'approver.js')])}`,
-        '-c', `mcp_servers.ofis.env={${Object.entries(env).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(',')}}`);
+        '-c', `mcp_servers.ofis.env={${Object.entries(env).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(',')}}`, '-c', 'mcp_servers.ofis.tools.screenshot.approval_mode="approve"');
+      // Windows: yönetici kurulumu olmadan sandbox (aksi halde salt okunur/çalışma modunda tüm kabuk komutları "blocked by policy" ile reddediliyor ve Codex dosya okuyamıyor)
+      if (process.platform === 'win32') args.push('-c', 'windows.sandbox="unelevated"');
       args.push('-'); viaStdin = true;   // istem stdin'den: komut satırına kullanıcı metni girmez
     } else {   // https://antigravity.google/docs/cli/headless/
       // agy 1.3.x: --mode plan (salt planlama) | accept-edits (dosya düzenlemelerini kabul eder, komutlar izin ister → başsız modda reddedilir)
@@ -1044,17 +1046,22 @@ async function buildLoop(p, done, rounds, runOne) {
     if (revs.length) post(p, 'ceo', 'all', `Gözden geçirme turu ${round}: ${revs.map(who).join(', ')} ürüne bakıyor.`, { meet: 1 });
     await Promise.all(revs.map(async R => {
       const crit = (p.criteria || []).length ? `\nKABUL ÖLÇÜTLERİ:\n${p.criteria.map(c => `- ${c.id}: ${c.olcut}`).join('\n')}` : '';
-      const prov = R.provider && provUsable(R.provider) ? R.provider : 'claude';   // yapımcıdan farklı ajan; kullanılamıyorsa Claude Code
-      const r = await ask(p, R.agent, `GOZDEN_GECIRME (tur ${round})\nBu ürünün ${R.label} sorumlususun. Ürünü TEK bir yapımcı (${S.agents[builderCli]?.name || builderCli}, ${roleName(builder)}) yazdı; sen dosya YAZMAZSIN, yalnızca bakar ve somut geri bildirim verirsin. Odak: ${R.focus}.\n` +
+      const prov0 = R.provider && provUsable(R.provider) ? R.provider : 'claude';   // yapımcıdan farklı ajan; kullanılamıyorsa Claude Code
+      const review = prov => ask(p, R.agent, `GOZDEN_GECIRME (tur ${round})\nBu ürünün ${R.label} sorumlususun. Ürünü TEK bir yapımcı (${S.agents[builderCli]?.name || builderCli}, ${roleName(builder)}) yazdı; sen dosya YAZMAZSIN, yalnızca bakar ve somut geri bildirim verirsin. Odak: ${R.focus}.\n` +
         `PROJE TANIMI: ${cut(p.brief || '', 1000)}${visionText(p)}${crit}` +
         ((p.decisions || []).length ? `\nYAPIMCININ KARARLARI (bilinçli seçimler; ancak kullanıcıya zarar veriyorsa itiraz et):\n${p.decisions.map(x => '- ' + x).join('\n')}` : '') +
         `\nÜRÜN DOSYALARI (çalışma klasöründe; hepsine erişimin var, kendin oku): ${files.join(', ') || '(yok)'}${verifyText(v)}` +
         (rejected.length ? `\nYAPIMCININ GEREKÇESİYLE REDDETTİKLERİ (ikna edici değilse tekrar et, değilse önerme):\n${rejected.slice(-8).map(x => `- ${x.text} → ${x.not}`).join('\n')}` : '') +
-        `\nDosyaları OKU${R.agent === 'designer' && v.visual ? ' ve ekran görüntülerini Read ile aç' : ''}. Kullanıcı bu ürünü gerçekten beğensin diye en önemli sorunları bul. En fazla 6 bulgu; zevk farkı ve belirsiz öneri yazma. Önem: kritik = kullanıcıyı engelliyor ya da açıkça kötü görünüyor; orta = belirgin kalite sorunu; kucuk = cila.\n` +
+        `\nDosyaları OKU${R.agent === 'designer' && v.visual ? ' ve ekran görüntülerini Read ile aç' : ''}. Kullanıcı bu ürünü gerçekten beğensin diye en önemli sorunları bul. En fazla 6 bulgu; zevk farkı ve belirsiz öneri yazma. Önem: kritik = kullanıcıyı engelliyor ya da açıkça kötü görünüyor; orta = belirgin kalite sorunu; kucuk = cila. Dosyaları okuyamadıysan ya da ürünü göremediysen tahmin yürütme: JSON'a "incelenemedi":true ekle.\n` +
         `Yanıtının EN SON satırı SADECE şu JSON olsun: {"olmus":["en fazla 3 güçlü yan"],"bulgular":[{"onem":"kritik|orta|kucuk","konu":"ne, nerede (dosya/bölüm)","oneri":"nasıl düzeltilir, somut"}]${R.audit ? ',"kabul":{"K1":"gecti — kanıt"},"puan":{"dogruluk":n,"tamlik":n,"talimat":n,"not":"somut kanıt"}' : ''}}`,
         { purpose: R.label, phase: 'plan', provider: prov, cat: categoryOf(R.agent, 'inceleme denetim review', '') });
+      const blind = r => !r.error && (/"incelenemedi"\s*:\s*true/.test(r.response) || !findingsOf(r.response));
+      let r = await review(prov0);
+      // inceleyemeyen (dosya okuyamayan, biçime uymayan) ajanın boş listesi "sorun yok" sayılmaz: inceleme Claude Code ile bir kez daha yapılır
+      if (blind(r) && r.provider !== 'claude' && provUsable('claude')) { logEv(p, r.provider, 'task', `${R.label}: ürünü inceleyemedi, Claude Code ile yeniden inceleniyor`); r = await review('claude'); }
       if (r.error) { failed.push(r.error); return; }
-      const fd = findingsOf(r.response); if (!fd) return;
+      if (blind(r)) { failed.push(`${R.label} ürünü inceleyemedi`); return; }
+      const fd = findingsOf(r.response);
       if (R.audit) {
         const acc = acceptOf(fd.raw, p.criteria || []); for (const [k, x] of Object.entries(acc)) (p.acceptance ||= {})[k] = { ...x, ts: Date.now() };
         for (const [id, x] of Object.entries(acc)) if (x.durum === 'kaldi') { const c = p.criteria.find(y => y.id === id); fd.bulgular.push({ onem: 'kritik', text: `${id} karşılanmadı: ${c?.olcut || ''}${x.not ? ' — ' + x.not : ''}` }); }
