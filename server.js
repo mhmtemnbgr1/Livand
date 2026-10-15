@@ -12,7 +12,7 @@ import { checkWorkspace, checksText, walk } from './lib/checks.mjs';
 import { productize, reviewersFor, findingsOf, decisionsListOf, triageOf, stripSections } from './lib/orchestra.mjs';
 import { createRequire } from 'node:module';
 import { growthPrompt, growthPromptEn, migrateAgent, addLesson, metricLessons, extractSelfReview, levelOf, focusOf, charterFor, baselineOf, savingsOf, MIN_ACCEPT } from './lib/growth.mjs';
-import { PROVIDERS, PROVIDER_KEYS, AGENT_PROVIDERS, CATEGORIES, PRIOR_SRC, categoryOf, recordResult, estimate, pickProvider, parseCodexLine, parseAgyLine, newAcc, shellQuote, safeModel, providerFits, cliGuide } from './lib/providers.mjs';
+import { PROVIDERS, PROVIDER_KEYS, AGENT_PROVIDERS, CATEGORIES, PRIOR_SRC, categoryOf, recordResult, estimate, pickProvider, parseCodexLine, parseAgyLine, newAcc, shellQuote, safeModel, providerFits, cliGuide, mountWorkspaceMcp, restoreAllMounts } from './lib/providers.mjs';
 import { parseUsage, parseReset, cut, validateDir, PATH_RE, norm, insideWs, outsidePaths, SENSITIVE, SAFE_SEG, isSafeReadOnly, DANGER, INSTALL, POP_NPM, POP_PY, lev, typoOf, ageText, fmtN, verdict, parseInstalls, npmSpec, classify, splitSummary, rubricOf, reviewOf, fixesOf, critiqueOf, repliesOf, decisionsOf, criteriaOf, acceptOf, W, scoreTask, TEMPLATES } from './lib/policy.mjs';
 
 const __dir = path.dirname(fileURLToPath(import.meta.url));
@@ -545,12 +545,30 @@ function runClaude({ agentId, p, prompt, system, model, tools, allow, turns, mod
   });
 }
 
+// ---- Antigravity ekran görüntüsü aracı ----
+// agy'de çalıştırma başına MCP bayrağı yok: sunucu proje klasöründeki .agents/mcp_config.json ile (yalnızca çalıştırma süresince) verilir,
+// kullanıcının kendi dosyası varsa korunur ve sonra aynen geri yazılır. Başsız modda MCP izni sorulamadığı için kullanıcı Analiz → CLI kartından
+// onaylarsa genel ayara TEK bir dar kural eklenir: mcp(ofis/screenshot) (başka hiçbir araç/izin açılmaz).
+const AGY_SETTINGS = path.join(os.homedir(), '.gemini', 'antigravity-cli', 'settings.json'), AGY_RULE = 'mcp(ofis/screenshot)';
+function agyShotAllowed() { try { return (JSON.parse(fs.readFileSync(AGY_SETTINGS, 'utf8')).permissions?.allow || []).includes(AGY_RULE); } catch { return false; } }
+function setAgyShot(on) {
+  let j = {};
+  if (fs.existsSync(AGY_SETTINGS)) { try { j = JSON.parse(fs.readFileSync(AGY_SETTINGS, 'utf8')); } catch { throw new Error('Antigravity ayar dosyası okunamadı (geçersiz JSON); dosyaya dokunulmadı'); } }
+  const pm = j.permissions ||= {}; pm.allow = (pm.allow || []).filter(x => x !== AGY_RULE); if (on) pm.allow.push(AGY_RULE);
+  fs.mkdirSync(path.dirname(AGY_SETTINGS), { recursive: true }); fs.writeFileSync(AGY_SETTINGS, JSON.stringify(j, null, 2));
+  return agyShotAllowed();
+}
+const agyMcpOn = (dir, p) => mountWorkspaceMcp(path.join(dir, '.agents', 'mcp_config.json'), 'ofis', { command: process.execPath, args: [path.join(__dir, 'approver.js')],
+  env: { OFIS_URL: `http://127.0.0.1:${PORT}`, OFIS_AGENT: 'antigravity', OFIS_PROJECT: p?.id || '', OFIS_ONLY_SHOT: '1', ELECTRON_RUN_AS_NODE: '1' } });
+process.on('exit', restoreAllMounts);
+
 // Codex / Antigravity: ofisin onay kutusuna bağlanamazlar (Claude'un --permission-prompt-tool karşılığı yok);
 // bu yüzden kendi sandbox'larında, çalışma klasörüyle sınırlı ve onaysız ("asla sorma") modda çalıştırılırlar.
 function runOther(provider, { agentId, p, prompt, system, phase, cwd, think }) {
   return new Promise(resolve => {
     const cfg = S.settings.providers[provider] || {}, model = safeModel(cfg.model);
-    const full = `${system}${cliGuide(provider, { phase, trust: !!cfg.trust })}\n\n---\n${prompt}`;
+    const shot = provider === 'codex' || (provider === 'antigravity' && agyShotAllowed());   // ekran görüntüsü aracı bu çalıştırmada var mı
+    const full = `${system}${cliGuide(provider, { phase, trust: !!cfg.trust, shot })}\n\n---\n${prompt}`;
     let args, viaStdin = false;
     if (provider === 'codex') {   // https://developers.openai.com/codex/noninteractive
       args = ['exec', '--json', '--skip-git-repo-check', '--ephemeral', '-C', cwd, '-s', phase === 'work' ? 'workspace-write' : 'read-only', '-c', 'approval_policy=never'];
@@ -565,15 +583,17 @@ function runOther(provider, { agentId, p, prompt, system, phase, cwd, think }) {
       args.push('-'); viaStdin = true;   // istem stdin'den: komut satırına kullanıcı metni girmez
     } else {   // https://antigravity.google/docs/cli/headless/
       // agy 1.3.x: --mode plan (salt planlama) | accept-edits (dosya düzenlemelerini kabul eder, komutlar izin ister → başsız modda reddedilir)
-      args = ['-p', cut(full, 24000), '--output-format', 'stream-json', '--print-timeout', '25m', '--sandbox', '--disable-slash-commands', '--mode', phase === 'work' ? 'accept-edits' : 'plan'];
+      // --disable-slash-commands yalnızca iş aşamasında: agy 1.3.5'te birlikte verilince --mode plan etkisiz kalıyor (gözden geçiren dosya yazabilirdi)
+      args = ['-p', cut(full, 24000), '--output-format', 'stream-json', '--print-timeout', '25m', '--sandbox', ...(phase === 'work' ? ['--disable-slash-commands'] : []), '--mode', phase === 'work' ? 'accept-edits' : 'plan'];
       if (model) args.push('--model', model);
       if (!think) args.push('--effort', 'low');
       if (phase === 'work' && cfg.trust) args.push('--dangerously-skip-permissions');   // komutlara da sormadan izin: sadece sen "tam yetki" açtıysan; yine sandbox içinde
     }
     const acc = newAcc(), parse = provider === 'codex' ? parseCodexLine : parseAgyLine;
+    const mcpOff = provider === 'antigravity' && shot ? agyMcpOn(cwd, p) : null;   // Antigravity: aracı proje klasöründeki .agents/mcp_config.json ile ver, bitince geri al
     let out = '', err = '', child;
     try { child = spawnBin(BINS[provider], args, { cwd, env: cleanEnv(), windowsHide: true }); }
-    catch (e) { return resolve({ text: `Hata: ${PROVIDERS[provider].label} başlatılamadı (${e.message})`, tin: 0, tout: 0, tcache: 0, error: e.message }); }
+    catch (e) { mcpOff?.(); return resolve({ text: `Hata: ${PROVIDERS[provider].label} başlatılamadı (${e.message})`, tin: 0, tout: 0, tcache: 0, error: e.message }); }
     const kill = setTimeout(() => child.kill(), 25 * 60 * 1000);
     child.provider = provider;
     if (p) (p.procs ||= new Set()).add(child);
@@ -593,9 +613,9 @@ function runOther(provider, { agentId, p, prompt, system, phase, cwd, think }) {
         }
       }
     });
-    child.on('error', e => { clearTimeout(kill); p?.procs?.delete(child); allProcs.delete(child); resolve({ text: `Hata: ${PROVIDERS[provider].label} başlatılamadı (${e.message})`, tin: 0, tout: 0, tcache: 0, error: e.message }); });
+    child.on('error', e => { clearTimeout(kill); mcpOff?.(); p?.procs?.delete(child); allProcs.delete(child); resolve({ text: `Hata: ${PROVIDERS[provider].label} başlatılamadı (${e.message})`, tin: 0, tout: 0, tcache: 0, error: e.message }); });
     child.on('close', code => {
-      clearTimeout(kill); p?.procs?.delete(child); allProcs.delete(child);
+      clearTimeout(kill); mcpOff?.(); p?.procs?.delete(child); allProcs.delete(child);
       const body = acc.text.trim();
       let msg = acc.error || (code !== 0 ? (err.trim().split('\n').slice(-3).join(' ') || `çıkış kodu ${code}`) : null);
       if (child.userStop) msg = `${PROVIDERS[provider].label} bağlantısı kesildi`;
@@ -1302,7 +1322,7 @@ const publicState = () => ({ capabilities: CAPABILITIES.map(({ id, name, desc, r
   agents: Object.fromEntries(Object.entries(S.agents).map(([k, a]) => [k, { ...a, label: PROVIDERS[k].label, level: levelOf(a), usable: provUsable(k), installed: k === 'claude' ? !!CLAUDE || FORCE_DEMO : !!BINS[k] || FORCE_DEMO }])),
   offices: S.offices, ext: S.ext, user: USER, projects: S.projects.map(({ procs, ...x }) => ({ ...x, own: !!x.dir && path.dirname(path.resolve(x.dir)).toLowerCase() === path.resolve(WORK).toLowerCase() })), requests: S.requests.map(reqMeta), parallel: parallel(), approvals: [...approvals.values()].map(strip),
   live: SHOWCASE ? { claude: true, info: 'bağlı', demo: false, off: false, available: true } : { claude: liveMode() && !cliOff(), info: claudeInfo.text, demo: !liveMode(), off: cliOff(), available: !!CLAUDE && !FORCE_DEMO },
-  providers: PROVIDER_KEYS.map(k => ({ key: k, label: PROVIDERS[k].label, installed: SHOWCASE || (k === 'claude' ? !!CLAUDE : !!BINS[k]), ok: SHOWCASE || (k === 'claude' ? liveMode() : !!provInfo[k].ok), text: SHOWCASE ? 'bağlı' : k === 'claude' ? claudeInfo.text : provInfo[k].text, usable: provUsable(k), login: logins[k] ? { url: logins[k].url, text: logins[k].text, ts: logins[k].ts } : null, src: PRIOR_SRC[k], ...(k === 'claude' ? { on: true } : S.settings.providers[k]) })),
+  providers: PROVIDER_KEYS.map(k => ({ key: k, label: PROVIDERS[k].label, installed: SHOWCASE || (k === 'claude' ? !!CLAUDE : !!BINS[k]), ok: SHOWCASE || (k === 'claude' ? liveMode() : !!provInfo[k].ok), text: SHOWCASE ? 'bağlı' : k === 'claude' ? claudeInfo.text : provInfo[k].text, usable: provUsable(k), shotTool: k === 'antigravity' ? agyShotAllowed() : k === 'codex' || k === 'claude', login: logins[k] ? { url: logins[k].url, text: logins[k].text, ts: logins[k].ts } : null, src: PRIOR_SRC[k], ...(k === 'claude' ? { on: true } : S.settings.providers[k]) })),
   routing: Object.fromEntries(Object.keys(CATEGORIES).map(c => [c, { label: CATEGORIES[c], est: Object.fromEntries(PROVIDER_KEYS.map(k => [k, estimate(S.routing, k, c)])) }])),
   shared: S.shared, daily: S.daily, limits: S.limits, savings: savingsState(), usage: S.usage || null, log: S.log.slice(-300), settings: S.settings, templates: Object.entries(TEMPLATES).map(([key, t]) => ({ key, name: t.name, hint: t.hint })) });
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.glb': 'model/gltf-binary', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.txt': 'text/plain; charset=utf-8' };
@@ -1412,6 +1432,7 @@ http.createServer(async (req, res) => {
         if (parts[3] === 'connect') return json(res, connectProvider(parts[2]));
         if (parts[3] === 'disconnect') return json(res, disconnectProvider(parts[2], !!b.logout));
         if (parts[3] === 'check') { checkProviders(); return json(res, { ok: true }); }
+        if (parts[3] === 'shot-tool' && parts[2] === 'antigravity') { try { const on = setAgyShot(b.on !== false); emit('state', publicState()); return json(res, { ok: true, on }); } catch (e) { return json(res, { error: e.message }, 400); } }   // kullanıcının düğmesiyle
         if (parts[3] === 'open') { const u = logins[parts[2]]?.url; return json(res, u && openAuthUrl(u) ? { ok: true } : { error: "Açık bir giriş isteği yok; Bağlan'a yeniden bas" }); }
       }
       if (req.method === 'POST' && parts[1] === 'limits' && parts[2] === 'check') { const r = await checkLimit(); return json(res, { ...r, limits: S.limits }); }

@@ -1,7 +1,10 @@
 // Çoklu CLI sağlayıcısı ve öğrenen yönlendirici (saf işlevler) — çalıştır: npm test
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { categoryOf, recordResult, estimate, pickProvider, parseCodexLine, parseAgyLine, newAcc, shellQuote, safeModel, PRIORS, PRIOR_N, providerFits, cliGuide } from '../lib/providers.mjs';
+import { categoryOf, recordResult, estimate, pickProvider, parseCodexLine, parseAgyLine, newAcc, shellQuote, safeModel, PRIORS, PRIOR_N, providerFits, cliGuide, mountWorkspaceMcp } from '../lib/providers.mjs';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 test('iş türü: rol ve görev metninden çıkar', () => {
   assert.equal(categoryOf('auditor', 'kodu incele'), 'denetim');
@@ -111,4 +114,29 @@ test('CLI yönergesi: her CLI kendi ortamını ve sınırlarını öğrenir', ()
   assert.match(cliGuide('antigravity', { phase: 'plan' }), /Plan modundasın/);
   for (const k of ['codex', 'antigravity']) assert.match(cliGuide(k), /HARFİYEN/, 'yanıt biçimine uyma notu');
   assert.equal(cliGuide('claude'), '', 'Claude Code istemi zaten ona göre');
+});
+
+test('geçici MCP ayarı: kullanıcının dosyası korunup geri yazılır, yoksa silinir, eşzamanlı çalıştırmalar sayılır', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'livand-mcp-')), f = path.join(dir, '.agents', 'mcp_config.json'), srv = { command: 'node', args: ['a.js'] };
+  try {
+    // dosya yokken: eklenir, son çalıştırma bitince dosya ve boş klasör silinir
+    const off1 = mountWorkspaceMcp(f, 'ofis', srv), off2 = mountWorkspaceMcp(f, 'ofis', srv);
+    assert.deepEqual(JSON.parse(fs.readFileSync(f, 'utf8')).mcpServers.ofis, srv);
+    off1(); off1(); assert.ok(fs.existsSync(f), 'diğer çalıştırma sürerken dosya kalır (aynı kapatma iki kez sayılmaz)');
+    off2(); assert.ok(!fs.existsSync(f) && !fs.existsSync(path.dirname(f)), 'son çalıştırma bitince temizlenir');
+    // kullanıcının kendi dosyası: sunucusu korunur, sonra aynen geri yazılır
+    const mine = JSON.stringify({ mcpServers: { benim: { command: 'x' } }, not: 1 });
+    fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, mine);
+    const off3 = mountWorkspaceMcp(f, 'ofis', srv), j = JSON.parse(fs.readFileSync(f, 'utf8'));
+    assert.ok(j.mcpServers.benim && j.mcpServers.ofis && j.not === 1);
+    off3(); assert.equal(fs.readFileSync(f, 'utf8'), mine, 'birebir geri yazılır');
+    // bozuk dosyaya dokunulmaz
+    fs.writeFileSync(f, '{bozuk'); assert.equal(mountWorkspaceMcp(f, 'ofis', srv), null); assert.equal(fs.readFileSync(f, 'utf8'), '{bozuk');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('CLI notu: ekran görüntüsü aracı varsa Antigravity bilir, yoksa verilen yolları kullanır', () => {
+  assert.match(cliGuide('antigravity', { phase: 'plan', shot: true }), /screenshot/);
+  assert.match(cliGuide('antigravity', { phase: 'plan' }), /Ekran görüntüsü aracın yok/);
+  assert.match(cliGuide('codex', { phase: 'plan' }), /TÜM dosyalara erişimin var/);
 });
