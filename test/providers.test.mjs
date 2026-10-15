@@ -1,7 +1,7 @@
 // Çoklu CLI sağlayıcısı ve öğrenen yönlendirici (saf işlevler) — çalıştır: npm test
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { categoryOf, recordResult, estimate, pickProvider, parseCodexLine, parseAgyLine, newAcc, shellQuote, safeModel, PRIORS, PRIOR_N } from '../lib/providers.mjs';
+import { categoryOf, recordResult, estimate, pickProvider, parseCodexLine, parseAgyLine, newAcc, shellQuote, safeModel, PRIORS, PRIOR_N, providerFits, cliGuide } from '../lib/providers.mjs';
 
 test('iş türü: rol ve görev metninden çıkar', () => {
   assert.equal(categoryOf('auditor', 'kodu incele'), 'denetim');
@@ -91,4 +91,24 @@ test('güvenli argüman ve model adı', () => {
   for (const bad of ['a & del x', 'x"y', '%PATH%', 'a|b']) assert.throws(() => shellQuote(bad));
   assert.equal(safeModel('gpt-5.5-codex'), 'gpt-5.5-codex');
   assert.equal(safeModel('x; rm -rf'), '');
+});
+
+test('CLI uygunluğu: işi yapamayacak CLI seçilmez', () => {
+  assert.equal(providerFits('codex', { web: true }).ok, false, 'Codex ağsız: web araştırması yok');
+  assert.equal(providerFits('codex', { bash: true }).ok, true, 'Codex komut çalıştırır');
+  assert.equal(providerFits('antigravity', { bash: true }).ok, false, 'tam yetki kapalıyken komut yok');
+  assert.equal(providerFits('antigravity', { bash: true }, { trust: true }).ok, true);
+  assert.equal(providerFits('antigravity', { web: true }).ok, true);
+  assert.equal(providerFits('claude', { web: true, bash: true }).ok, true);
+  assert.match(providerFits('antigravity', { bash: true }).why, /tam yetki/);
+});
+
+test('CLI yönergesi: her CLI kendi ortamını ve sınırlarını öğrenir', () => {
+  const cx = cliGuide('codex', { phase: 'work' }), cxr = cliGuide('codex', { phase: 'plan' });
+  assert.match(cx, /Codex CLI/); assert.match(cx, /AĞ KAPALI/); assert.match(cx, /asset aracı/); assert.match(cxr, /SALT OKUNURSUN/);
+  assert.match(cliGuide('antigravity', { phase: 'work' }), /KOMUT ÇALIŞTIRAMAZSIN/);
+  assert.match(cliGuide('antigravity', { phase: 'work', trust: true }), /sormadan çalıştırabilirsin/);
+  assert.match(cliGuide('antigravity', { phase: 'plan' }), /Plan modundasın/);
+  for (const k of ['codex', 'antigravity']) assert.match(cliGuide(k), /HARFİYEN/, 'yanıt biçimine uyma notu');
+  assert.equal(cliGuide('claude'), '', 'Claude Code istemi zaten ona göre');
 });

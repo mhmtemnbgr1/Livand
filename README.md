@@ -111,6 +111,61 @@ Her ajanın **mesleki standartları** ve **teslim öncesi kontrol listesi** vard
 - **Seviye:** Stajyer → Yardımcı → Uzman → Kıdemli → Usta. Deneyim her görevin puanı kadar artar; ortalama kalite düşükse seviye sınırlanır. Seviye atlayınca ajan sohbette haber verir.
 - Ajana tıklayınca seviye, ilerleme, gelişim alanı, güçlü yönler, standartlar ve dersler (kaynağıyla) görünür; istemediğin dersi silebilirsin.
 
+## Ajan becerileri
+Her rolün gerçek meslek yöntemlerinden oluşan becerileri vardır; her beceri **adımlar** ve **"bitti sayılması için" ölçütlerinden** oluşur (`lib/skills.mjs`).
+- **Tasarımcı:** tasarım sistemi, erişilebilir tasarım (WCAG AA), duyarlı yerleşim, kullanıcı akışı, marka kimliği.
+- **Yazılımcı:** semantik HTML, duyarlı CSS, erişilebilir kod, form doğrulama, temiz JavaScript, çalıştır ve doğrula, performans ve teknik SEO.
+- **Araştırmacı:** kaynak doğrulama, rakip analizi, hedef kitle, yerel işletme görünürlüğü.
+- **Yazar:** dönüşüm odaklı metin, SEO uyumlu metin, marka sesi, arayüz metinleri, blog yazısı.
+- **Denetçi:** teslim kontrolü, web sitesi denetimi, erişilebilirlik denetimi, kod incelemesi, içerik denetimi.
+- **CEO:** kapsam netleştirme, paralel planlama.
+
+Her görevde görev metnine en uyan **en fazla 3 beceri** istem içine girer (az token); üç CLI de aynı şekilde kullanır. Panoda her adımda hangi becerilerin uygulandığı görünür. Ajan kartındaki **Becerileri** bölümünden beceri açıp kapatabilir, adımlarını görebilir ve **kendi becerini** ekleyebilirsin (ad, tetikleyen kelimeler, adımlar; kelime boşsa her görevde uygulanır). Senin eklediğin beceri, uyduğunda hazır becerilerin önüne geçer. Eklenen ajanlar becerilerini seçtikleri yetenek şablonundan alır.
+
+## Ürün modu: tek yapımcı ↔ gözden geçirenler
+Araştırmalar (Cognition, [Multi-Agents: What's Actually Working](https://cognition.com/blog/multi-agents-working), 2026; [Don't Build Multi-Agents](https://cognition.com/blog/dont-build-multi-agents); Anthropic, [multi-agent research system](https://www.anthropic.com/engineering/multi-agent-research-system); MetaGPT) aynı sonuca varıyor: aynı ürüne **paralel yazan** ajanlar birbirinin örtük kararlarını göremez ve tutarsız sonuç üretir (ör. kuş ve arka plan farklı tarzda); işe yarayan, **yazmanın tek elden** yapılması ve diğer ajanların girdi, gözden geçirme ve öneriyle zekâ katmasıdır. Ofis site/uygulama/oyun gibi ürünlerde bu modelle çalışır:
+1. **Girdiler (paralel):** Araştırmacı, yazar ve tasarımcı yapımcıya belge hazırlar (bulgular, sayfa metinleri, tasarım yönü). CEO vizyona **tarz** (yaratıcı yön) ve **yapı** (sayfa/ekran bölümleri) yazar.
+2. **Tek yapımcı:** Yazılımcı ürünü **tasarım dahil** baştan sona yazar. Girdileri özet değil **tam metin** olarak alır, tasarım becerileri de ona verilir, daha çok adım hakkı vardır. Örtük kararlarını (palet, yazı tipi, yerleşim, dosya yapısı) "---KARARLAR---" altında açıkça yazar; kararlar sohbete ve gözden geçirenlere gider.
+3. **Gözden geçirme (temiz bağlam, yazmaz):** Tasarımcı ekran görüntülerine bakıp görseli, denetçi kabul ölçütlerini ve hataları, yazar (girdi verdiyse) metni inceler; **Codex/Antigravity bağlıysa ikinci görüş** olarak katılır. Kesin kontrol hataları ve tarayıcı sorunları da bulguya eklenir.
+4. **Triyaj (tartışma):** Yapımcı her bulguya kullanıcının isteği ve vizyona göre "uygulandı" ya da "reddedildi — gerekçe" der ve kabul ettiklerini kendisi uygular (sohbette görünür). Sonraki turda gözden geçirenler reddedilenleri gerekçesiyle görür, ikna olmazlarsa tekrar eder. Ciddi bulgu kalmayınca biter; Analiz → Ekip içi inceleme ile tur sayısı (varsayılan 2) değişir.
+Ürün işi olmayan projeler (araştırma, blog, içerik) ekip toplantısı akışıyla yürür. Yapımcının düzeltmeleri ilk yapımla aynı CLI'de çalışır.
+
+**Codex ve Antigravity nasıl çalışır:** İstemler Claude Code'a göre yazıldığından, bu iki CLI'ye ayrıca bir **çalışma ortamı notu** eklenir: Claude araç adlarının (Read, Grep, WebSearch…) yerine kendi araçlarını kullanmaları, neyi yapıp yapamayacakları (Codex: ağ kapalı; Antigravity: "tam yetki" kapalıyken komut çalıştıramaz; gözden geçirmede ikisi de salt okunur) ve yanıt biçimine harfiyen uymaları. Ayrıca bir CLI işin olmazsa olmazını karşılayamıyorsa o işe verilmez: web araştırması Codex'e, asset aracı/çalıştırıp doğrulama gerektiren iş "tam yetki" kapalı Antigravity'ye gitmez; ajan o CLI'ye sabitlenmiş olsa bile görev Claude Code ile çalışır ve nedeni günlüğe yazılır.
+
+> İpucu: Ürünün kalitesinin tavanı yapımcının modelidir. Yazılımcıyı (ajan kartından) en güçlü modele almak en büyük farkı yaratır.
+
+## Proje yönetimi: kabul ölçütleri → sözleşme → uygulama → doğrulama
+Ekip, MetaGPT/ChatDev'deki gibi aşamalı ve belgeye dayalı çalışır; iş, ölçülebilir ölçütler karşılanana kadar bitmiş sayılmaz.
+1. **Kabul ölçütleri:** CEO planla birlikte 3-8 gözlemlenebilir ölçüt yazar (K1, K2…) ve her görevi karşılaması gereken ölçütlere bağlar. Ajan kendi ölçütlerini istemde görür ve teslimden önce kontrol eder.
+2. **Sözleşme:** Birden çok kişinin aynı ürüne katkı verdiği işlerde ilk görev ortak bir sözleşme belgesidir (dosya yapısı, adlar, tokenlar, veri biçimleri); diğerleri ona göre paralel çalışır.
+3. **Otomatik doğrulama (token harcamaz):** Kırık sayfa içi bağlantı, bulunamayan dosya (görsel, betik, stil, atlas), JS/JSON sözdizimi, yer tutucu metin, eksik viewport/başlık/alt metni kodla bulunur. Giriş sayfası varsa gizli bir Electron penceresinde açılır: **masaüstü ve mobil ekran görüntüsü** alınır, konsol hataları ve yatay taşma yakalanır. Doğrulama denetimden önce, ekip toplantısından önce ve en sonda çalışır.
+4. **Denetim:** Denetçi kesin kontrol sonuçlarını ve ekran görüntülerini görür, her kabul ölçütünü "geçti/kaldı" diye kanıtıyla işaretler. Kalan ölçütler ve kesin kontrol hataları ekip toplantısının gündemine, ilgili dosyanın sorumlusuna atanarak girer.
+5. **Son rapor:** "Kabul ölçütleri: 5/6 karşılandı", otomatik doğrulama sonucu ve dosyalar. Panoda ölçütlerin durumu, doğrulama ayrıntıları ve ekran görüntüleri görünür.
+
+**Canlı önizleme:** Üst çubuktaki göz düğmesi ekibin ürettiği siteyi/oyunu büyük bir pencerede açar (masaüstü/mobil, yenile, tarayıcıda aç); bir adım bitince kendiliğinden yenilenir. Önizleme **ayrı bir porttan** (ana port + 1, `OFIS_PREVIEW_PORT` ile değişir), yalnızca projenin klasöründen ve salt okunur sunulur; uygulamanın API'si yalnızca kendi portundan gelen tarayıcı isteklerini kabul ettiği için üretilen sayfa API'ye erişemez.
+
+**Geri alma:** Her adım başlamadan önce çalışma klasörünün anlık görüntüsü uygulamanın veri klasörüne alınır (50 MB üstü klasörlerde alınmaz, proje başına son 20 tutulur). Panoda "↶ Bu adımdan önceye dön" klasörü o hâline döndürür; sonradan oluşan dosyalar **silinmez**, yedek klasörüne taşınır; geri almadan önce de bir görüntü alınır. Geri alınan adımlar sıraya döner, "Devam et" ile yeniden çalışır.
+
+**Düzeltmelerde bağlam:** Düzeltme ve akran önerisi turlarında ajan kendi önceki raporunu görür; dosyaları baştan keşfetmez (token tasarrufu). Claude Code oturumlarını sürdürmek (resume) bilinçli olarak kullanılmaz: oturum kayıtlarını kullanıcının ev klasörüne yazar.
+
+## Yetenekler ve proje türleri
+CEO planlarken ofisin **yetenek kataloğunu** görür ve görevlere yetenek atar (plan kartında ve panoda rozet olarak görünür). Atanan yeteneğin kullanım talimatı o görevin istemine girer; gerekiyorsa göreve ek araç (ör. Bash) açılır. CEO hiç yetenek atamazsa (ya da şablon kullanılırsa) görev metnine göre otomatik tamamlanır.
+- **Görsel/asset hattı** (tasarımcı, yazılımcı): `tools/assets.mjs` — bağımlılıksız PNG aracı. `pixel` (piksel sanatı JSON → PNG, animasyon kareleri → şerit), `nobg` (arka planı saydam yap; kenardan dolgu, karakterin içi korunur), `trim`, `split --auto|--grid` (sprite sheet'i assetlere böl + manifest), `pack` (atlas.png + atlas.json), `scale`, `info`. Bu araç çalışma klasörü içinde ve zincirleme komut olmadan **onay beklemeden** çalışır.
+- **Vektör çizim (SVG)**: logo, ikon, karakter, katmanlı arka plan.
+- **Çalıştırıp doğrulama** (yazılımcı): sözdizimi ve test komutları.
+
+> Ofis fotoğraf gerçekliğinde resim **üretemez** (CLI'ler görsel üretmez); görseller piksel sanat ya da SVG olarak üretilir. Senin verdiğin PNG'ler (ör. bir sprite sheet) çalışma klasörüne konursa arka planı kaldırılıp assetlere bölünebilir.
+
+**Proje türü rehberleri:** İstek bir türe uyuyorsa (oyun, web sitesi, web uygulaması) CEO'ya önerilen iş akışı verilir. Örneğin oyunda: tasarım belgesi + asset listesi ve atlas sözleşmesi → assetler ile oyun kodu **paralel** → oynanabilirlik denetimi. Oyun için ayrıca beceriler var: oyun tasarım belgesi, oyun asseti üretimi, oyun geliştirme (Canvas), oyun denetimi.
+
+## Ekip içi inceleme
+- **Ortak ürün vizyonu:** CEO projeyi yalnızca ön yüz olarak değil, bütün bir ürün olarak planlar (araştırma, içerik, tasarım, teknik, yayına alma, kalite) ve planla birlikte **amaç, kitle, başarı ölçütü ve kapsamı** yazar. Vizyon plan kartında görünür ve her ajanın istemine girer.
+- **Paralel çalışma:** Her görev kendi önkoşulları biter bitmez başlar; aynı anda çalışan ajanlar birbirinin dosyalarına yazmaz.
+- **Akran incelemesi:** Bir görev bitince, o çıktının üzerine çalışacak ajan dosyaları okuyup somut öneri verir; öneri varsa sahibi bir kez uygular.
+- **Ekip toplantısı:** İlk sürüm bitince herkes ürünün **bütününü** okuyup değerlendirir: ✓ olmuş, ✗ olmamış, → olabilir (her madde bir sorumluya atanır). Eleştiri alan ajan her maddeye "katılıyorum / kısmen / katılmıyorum" diye gerekçesiyle yanıt verir. CEO tartışmayı tartıp kararları ve reddedilen önerileri açıklar. Denetçinin bulguları da gündeme girer. Toplantı sohbette ayrı renkte, panoda aşamalarıyla (değerlendirme → tartışma → karar) görünür.
+- **Kararlar → düzeltme → yeniden denetim:** Kararlar ilgili ajanlara paralel düzeltme görevi olarak gider, ardından denetçi tekrar bakar. Düzeltmeler ayrı puanlanmaz; yeniden denetimin kalite notu asıl göreve yansır.
+- **Analiz → Ekip içi inceleme:** Kapalı / 1 tur (varsayılan) / 2 tur. Tur arttıkça kalite ve token harcaması artar.
+
 ## Puanlama (ölçülebilir)
 Puan (1-10) = Teslimat %40 + Kalite %35 + Verimlilik %15 + Uyum %10.
 - **Teslimat:** hata yok mu, beklenen dosya klasörde var ve boş değil mi.

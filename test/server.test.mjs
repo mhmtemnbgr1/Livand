@@ -12,7 +12,7 @@ const root = path.dirname(here);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 function startServer(extraEnv = {}, opts = {}) {
-  const port = opts.port || 4300 + Math.floor(Math.random() * 600);
+  const port = opts.port || 4300 + 2 * Math.floor(Math.random() * 300);   // çift port: önizleme (port+1) başka bir test sunucusuyla çakışmasın
   const dataDir = path.join(here, `.data-${port}`);
   const proc = spawn(process.execPath, [path.join(root, 'server.js')], {
     cwd: root, windowsHide: true,
@@ -115,7 +115,8 @@ test('görev akışı: plan → onay → pano → puan → çalıştırma geçmi
   await S.api(`projects/${p.id}/plan`, { action: 'approve' });
   const get = async () => (await S.api('state')).json.projects.find(x => x.id === p.id);
   const done = await waitFor(async () => { const q = await get(); return q.board?.length && !q.executing && q.board.every(t => t.status === 'bitti') && q; }, 100000, 1000);
-  assert.equal(done.board.length, 3);
+  assert.equal(done.board.filter(t => !t.kind).length, 3);
+  assert.ok(done.board.some(t => t.kind === "ekip toplantısı" && /onayladı/.test(t.summary)), "itiraz yoksa toplantı onayla biter");
   assert.equal(done.runs.length, 1);
   assert.ok(done.spent > 0, 'token harcaması kaydedilmeli');
   assert.ok(S.events.some(e => e.type === 'celebrate'), 'kutlama olayı yayınlanmalı');
@@ -154,7 +155,163 @@ test('token bütçesi: aşılınca durur, bütçe artınca devam eder', { timeou
   await S.api(`projects/${p.id}/settings`, { budget: 100000 });
   await S.api(`projects/${p.id}/resume`, {});
   const fin = await waitFor(async () => { const q = await get(); return !q.executing && q.board.every(t => t.status === 'bitti') && q; }, 100000, 1000);
-  assert.equal(fin.board.length, 3);
+  assert.equal(fin.board.filter(t => !t.kind).length, 3);
+});
+
+test('ekip içi kalite: akran incelemesi öneri verir, denetçi düzeltme turu açar, yeniden denetler', { timeout: 120000 }, async () => {
+  const R = startServer({ OFIS_DEMO_REVIEW: 'revize', OFIS_DEMO_MS: '300' }); await R.ready; R.listen();
+  try {
+    const p = (await R.api('projects', { name: 'İnceleme', brief: 'Kahve yazısı', template: 'blog' })).json;
+    await R.api(`projects/${p.id}/plan`, { action: 'approve' });
+    const get = async () => (await R.api('state')).json.projects.find(x => x.id === p.id);
+    const done = await waitFor(async () => { const q = await get(); return q.board?.length && !q.executing && q.board.every(t => t.status === 'bitti') && q; }, 100000, 500);
+    // araştırmacının çıktısını, onun üzerine çalışacak yazar inceler ve öneriler uygulanır
+    const t1 = done.board.find(t => t.id === 't1');
+    assert.equal(t1.review?.by, 'writer');
+    assert.equal(t1.review.karar, 'revize');
+    assert.ok(t1.review.applied, 'öneriler uygulanmalı');
+    assert.ok(!t1.phase, 'inceleme aşaması temizlenmeli');
+    // yazarın çıktısını yalnızca denetçi kullanır: ayrıca akran incelemesi yok
+    assert.ok(!done.board.find(t => t.id === 't2').review);
+    // ekip toplantısı: herkes bütünü değerlendirir, eleştiri alan yanıt verir, CEO karar verir
+    const mt = done.board.find(t => t.kind === 'ekip toplantısı');
+    assert.ok(mt && mt.status === 'bitti' && !mt.phase, 'toplantı panoda ve bitmiş olmalı');
+    assert.ok(mt.meeting.decisions >= 1, 'en az bir karar');
+    assert.ok(mt.meeting.rejected >= 1, 'itiraz edilen öneri reddedilir');
+    const meet = done.messages.filter(m => m.meet);
+    assert.ok(meet.some(m => m.from === 'researcher' && /Olmuş:/.test(m.text)) && meet.some(m => m.from === 'writer' && /Olmamış/.test(m.text)), 'iki ajan da değerlendirme yazar');
+    assert.ok(meet.some(m => /Katılmıyorum/.test(m.text)), 'tartışma: itiraz görünür');
+    assert.ok(meet.some(m => m.from === 'ceo' && /Kararlar:/.test(m.text) && /Reddedilenler:/.test(m.text)), 'CEO kararı');
+    // kararlar paralel düzeltme görevi olur, ardından yeniden denetim (varsayılan 1 tur)
+    const fx = done.board.filter(t => t.kind === 'düzeltme'), ra = done.board.filter(t => t.kind === 'yeniden denetim');
+    assert.ok(fx.length >= 1 && fx.every(t => ['researcher', 'writer'].includes(t.agent)) && /toplantı/.test(fx[0].instruction));
+    assert.equal(ra.length, 1);
+    assert.deepEqual(ra[0].needs, fx.map(t => t.id));
+    assert.ok(done.messages.some(m => m.review === 'revize' && m.from === 'writer' && m.to === 'researcher'), 'öneri mesajı sohbete düşer');
+    assert.ok(done.messages.some(m => /akran incelemesi/.test(m.text) && /ekip toplantısı/.test(m.text)), 'sonuç raporu ekip içi kaliteyi anar');
+    // düzeltmeler ayrı puanlanmaz: puan sadece asıl görevlere
+    assert.equal(done.scores.filter(s => s.from === 'metrik').length, 2);
+    // ayar kapalıyken inceleme ve düzeltme turu yok
+    await R.api('settings', { review: 0 });
+    assert.equal((await R.api('state')).json.settings.review, 0);
+    const p2 = (await R.api('projects', { name: 'Kapalı', brief: 'x', template: 'blog' })).json;
+    await R.api(`projects/${p2.id}/plan`, { action: 'approve' });
+    const d2 = await waitFor(async () => { const q = (await R.api('state')).json.projects.find(x => x.id === p2.id); return q.board?.length && !q.executing && q.board.every(t => t.status === 'bitti') && q; }, 100000, 500);
+    assert.equal(d2.board.length, 3);
+    assert.ok(!d2.board.some(t => t.review));
+  } finally { R.closeSse(); await R.stop(); }
+});
+
+test('beceriler: ajan kartından açılıp kapatılır, kendi becerisi eklenir ve görevde istem içine girer', { timeout: 120000 }, async () => {
+  const st0 = (await S.api('state')).json;
+  assert.ok(st0.agents.writer.skillList.some(s => s.id === 'blog-yazisi' && s.on), 'hazır beceriler arayüze gelir');
+  await S.api('agents/writer', { skillsOff: ['seo-metin', 'yok-boyle-bir-beceri'], customSkills: [{ name: 'Kahve sözlüğü', when: 'kahve', steps: 'Terimleri açıkla\nÖrnek ver' }, { name: '', steps: 'geçersiz' }] });
+  const w = (await waitFor(async () => { const a = (await S.api('state')).json.agents.writer; return a.customSkills?.length && a; }, 5000, 100));
+  assert.deepEqual(w.skillsOff, ['seo-metin'], 'bilinmeyen beceri kimliği saklanmaz');
+  assert.equal(w.customSkills.length, 1, 'geçersiz beceri atılır');
+  assert.equal(w.skillList.find(s => s.id === 'seo-metin').on, false);
+  const p = (await S.api('projects', { name: 'Beceri Testi', brief: 'Kahve hakkında blog yazısı', template: 'blog' })).json;
+  await S.api(`projects/${p.id}/plan`, { action: 'approve' });
+  const done = await waitFor(async () => { const q = (await S.api('state')).json.projects.find(x => x.id === p.id); return q.board?.length && !q.executing && q.board.every(t => t.status === 'bitti') && q; }, 100000, 1000);
+  const t2 = done.board.find(t => t.agent === 'writer');
+  assert.ok(t2.skills.includes('Kahve sözlüğü') && t2.skills.includes('Blog yazısı'), 'panoda kullanılan beceriler: ' + t2.skills);
+  assert.ok(!t2.skills.includes('SEO uyumlu metin'), 'kapatılan beceri kullanılmaz');
+  const st = (await S.api('state')).json;
+  const rq = st.requests.filter(r => r.projectId === p.id && r.agent === 'writer' && r.phase === 'work').pop();
+  const full = (await S.api('requests/' + rq.id)).json;
+  assert.match(full.system, /## Kahve sözlüğü/);
+  await S.api('agents/writer', { skillsOff: [], customSkills: [] });   // diğer testleri etkilemesin
+});
+
+test('oyun projesi: CEO yetenek kataloğunu görür, asset hattını tasarımcıya verir, istem aracın yolunu taşır', { timeout: 120000 }, async () => {
+  const p = (await S.api('projects', { name: 'Oyun Testi' })).json;
+  await S.api(`projects/${p.id}/message`, { text: 'Bana basit bir zıplama oyunu yap' });
+  const get = async () => (await S.api('state')).json.projects.find(x => x.id === p.id);
+  const pl = (await waitFor(async () => (await get()).pendingPlan, 30000, 300));
+  const st0 = (await S.api('state')).json;
+  const planReq = st0.requests.filter(r => r.projectId === p.id && r.agent === 'ceo').pop();
+  const full = (await S.api('requests/' + planReq.id)).json;
+  assert.match(full.prompt, /OFİSİN YETENEKLERİ/); assert.match(full.prompt, /PROJE TÜRÜ: Oyun/);
+  assert.match(full.prompt, /ÜRÜN MODELİ/, 'CEO tek yapımcı modelini bilir');
+  assert.ok(st0.capabilities.some(c => c.id === 'asset-hatti'), 'arayüze yetenek adları gider');
+  // ürün modu: assetler ve kod tek yapımcıda (yazılımcı) birleşir; tasarım belgesi girdi kalır; denetim döngüye devredilir
+  assert.equal(pl.mode, 'urun');
+  const bt = pl.tasks.find(t => t.role === 'yapimci');
+  assert.equal(bt.agent, 'developer'); assert.deepEqual(bt.needs, ['t1']);
+  assert.ok(bt.caps.includes('asset-hatti') && bt.caps.includes('calistir-dogrula'));
+  assert.ok(!pl.tasks.some(t => t.agent === 'auditor'));
+  await S.api(`projects/${p.id}/plan`, { action: 'approve' });
+  const done = await waitFor(async () => { const q = await get(); return q.board?.length && !q.executing && q.board.every(t => t.status === 'bitti') && q; }, 100000, 1000);
+  const st = (await S.api('state')).json;
+  const wrs = await Promise.all(st.requests.filter(r => r.projectId === p.id && r.agent === 'developer' && r.phase === 'work').map(async r => (await S.api('requests/' + r.id)).json));
+  const wfull = wrs.find(r => /YAPIMCI_GOREVI/.test(r.prompt));
+  assert.ok(wfull, 'yapımcı isteği bulunmalı');
+  assert.match(wfull.prompt, /YETENEKLERİN/); assert.match(wfull.prompt, /tools[\\/]+assets\.mjs/);
+  assert.match(wfull.prompt, /GİRDİLER \(ekibin hazırladığı belgeler, tam metin/, 'girdi tam metin gider');
+  assert.ok(wfull.system.includes('Oyun geliştirme (Canvas)'), 'oyun becerisi seçilir');
+  assert.deepEqual(done.decisions.length, 3, 'yapımcının kararları kayıtlı');
+  assert.ok(done.messages.some(m => m.meet && /Verdiğim kararlar/.test(m.text)));
+  // gözden geçirme: tasarımcı ve denetçi baktı, ciddi bulgu yok → tek turda onay
+  const g = done.board.filter(t => t.kind === 'gözden geçirme');
+  assert.equal(g.length, 1); assert.ok(!done.board.some(t => t.kind === 'düzeltme'));
+  assert.ok(st.requests.some(r => r.projectId === p.id && r.agent === 'designer' && r.purpose === 'Tasarım incelemesi'));
+  assert.ok(done.messages.some(m => /ürün gözden geçirmeden geçti/.test(m.text)));
+});
+
+test('proje yönetimi: kabul ölçütleri, kesin kontroller, önizleme güvenliği ve geri alma', { timeout: 150000 }, async () => {
+  const R = startServer({ OFIS_DEMO_REVIEW: 'revize', OFIS_DEMO_MS: '300' }); await R.ready;
+  try {
+    const p = (await R.api('projects', { name: 'Yönetim' })).json;
+    const get = async () => (await R.api('state')).json.projects.find(x => x.id === p.id);
+    const dir = (await get()).dir, BROKEN = '<!doctype html><html><head><title>K</title></head><body><a href="#yok">x</a></body></html>';
+    fs.writeFileSync(path.join(dir, 'index.html'), BROKEN);
+    await R.api(`projects/${p.id}/message`, { text: 'Mahalledeki kırtasiye dükkanım için web sitesi' });
+    const pl = await waitFor(async () => (await get()).pendingPlan, 30000, 300);
+    assert.deepEqual(pl.criteria.map(c => c.id), ['K1', 'K2']);
+    assert.deepEqual(pl.tasks.find(t => t.role === 'yapimci').criteria, ['K1', 'K2']);
+    await R.api(`projects/${p.id}/plan`, { action: 'approve' });
+    const done = await waitFor(async () => { const q = await get(); return q.board?.length && !q.executing && q.board.every(t => t.status === 'bitti') && q; }, 120000, 500);
+    // kabul: K1 ilk gözden geçirmede kaldı → yapımcıya bulgu olarak gitti → sonraki turda geçti
+    assert.equal(done.acceptance.K1.durum, 'gecti'); assert.equal(done.acceptance.K2.durum, 'gecti');
+    assert.ok(done.messages.some(m => /Kabul ölçütleri: 2\/2 karşılandı/.test(m.text)), 'son rapor kabul durumunu verir');
+    const st = (await R.api('state')).json;
+    // yapımcı tek yazar: geri bildirim (kalan ölçüt + kesin kontrol + tasarım bulgusu) ona gider, triyaj yapar
+    const fx = await Promise.all(st.requests.filter(r => r.projectId === p.id && r.agent === 'developer' && r.phase === 'work').map(async r => (await R.api('requests/' + r.id)).json));
+    const tri = fx.find(r => /GERI_BILDIRIM_TRIYAJ \(tur 1\)/.test(r.prompt));
+    assert.ok(tri, 'triyaj isteği');
+    assert.match(tri.prompt, /\[kritik\] \(Denetim\) K1 karşılanmadı/);
+    assert.match(tri.prompt, /\[kritik\] \(Otomatik kontrol\) index\.html: Kırık sayfa içi bağlantı: #yok/);
+    assert.match(tri.prompt, /\(Tasarım incelemesi\) Başlık hiyerarşisi zayıf/);
+    assert.match(tri.prompt, /ÖNCEKİ RAPORUN/, 'yapımcı kendi raporunu görür');
+    assert.ok(done.messages.some(m => m.from === 'developer' && /Geri bildirime yanıtım:[\s\S]*Reddedildi — kapsam dışı/.test(m.text)), 'triyaj sohbette');
+    const rv2 = await Promise.all(st.requests.filter(r => r.projectId === p.id && r.purpose === 'Tasarım incelemesi').map(async r => (await R.api('requests/' + r.id)).json));
+    assert.ok(rv2.some(r => /GEREKÇESİYLE REDDETTİKLERİ/.test(r.prompt)), 'sonraki tur gözden geçiren reddedilenleri görür');
+    assert.ok(!st.requests.some(r => r.projectId === p.id && r.purpose === 'toplantı kararı'), 'ürün modunda toplantı yok');
+    assert.ok(done.board.every(t => t.agent !== 'designer' || !t.role), 'tasarımcı ürün dosyası yazmaz');
+    assert.ok(done.loop.tur >= 2 && done.loop.uygulandi >= 1 && done.loop.reddedildi >= 1);
+    assert.ok(done.verify && done.verify.tag === 'son' && done.verify.checks.errors >= 1);
+    // önizleme: ayrı port, yalnızca proje klasörü, yalnızca GET, doğru Host
+    const pv = (await R.api(`projects/${p.id}/preview`)).json;
+    assert.equal(pv.entry, 'index.html'); assert.equal(pv.port, R.port + 1);
+    const page = await fetch(pv.base + 'index.html'); assert.equal(page.status, 200); assert.equal(await page.text(), BROKEN);
+    assert.equal((await fetch(`http://127.0.0.1:${pv.port}/${p.id}/..%2f..%2fstate.json`)).status, 403, 'klasör dışına çıkılamaz');
+    assert.equal((await fetch(`http://127.0.0.1:${pv.port}/yok/index.html`)).status, 404);
+    assert.equal(await rawGet(pv.port, `/${p.id}/index.html`, { host: 'evil.example.com' }), 403, 'DNS rebinding');
+    assert.equal((await fetch(`http://127.0.0.1:${pv.port}/${p.id}/index.html`, { method: 'POST' })).status, 403);
+    const cross = await fetch(R.base + '/api/settings', { method: 'POST', headers: { 'content-type': 'application/json', origin: `http://127.0.0.1:${pv.port}` }, body: '{"review":0}' });
+    assert.equal(cross.status, 403, 'önizlemedeki sayfa uygulama API\'sini çağıramaz');
+    // geri alma: t1 öncesine dön → içerik geri gelir, sonradan oluşan dosya silinmez taşınır, adımlar sıraya döner
+    const t1 = done.board.find(t => t.id === 't1'); assert.ok(t1.snap, 'adımın anlık görüntüsü var');
+    fs.writeFileSync(path.join(dir, 'index.html'), 'DEĞİŞTİ'); fs.writeFileSync(path.join(dir, 'yeni.txt'), 'sonradan');
+    const rv = (await R.api(`projects/${p.id}/revert`, { snap: t1.snap })).json;
+    assert.equal(rv.ok, true);
+    assert.equal(fs.readFileSync(path.join(dir, 'index.html'), 'utf8'), BROKEN);
+    assert.ok(!fs.existsSync(path.join(dir, 'yeni.txt')) && rv.moved.includes('yeni.txt') && fs.existsSync(path.join(rv.trash, 'yeni.txt')), 'sonradan oluşan dosya taşınır');
+    const after = await get();
+    assert.ok(after.board.filter(t => !t.kind).every(t => t.status === 'bekliyor'), 'adımlar sıraya döner');
+    assert.ok(!after.board.some(t => t.kind), 'toplantı/düzeltme adımları kalkar');
+    assert.equal((await R.api(`projects/${p.id}/revert`, { snap: 'yok' })).status, 404);
+  } finally { await R.stop(); }
 });
 
 test('CLI düğmesi: demo modunda bağlantı kesme Claude yokmuş gibi davranmaz, durum döner', async () => {

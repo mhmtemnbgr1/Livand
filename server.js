@@ -6,9 +6,14 @@ import path from 'node:path';
 import os from 'node:os';
 import { spawn, execFile, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { pickSkills, skillsPrompt, skillsOf, cleanCustomSkill } from './lib/skills.mjs';
+import { CAPABILITIES, catalogPrompt, capsForTask, capabilityPrompt, capTools } from './lib/capabilities.mjs';
+import { checkWorkspace, checksText, walk } from './lib/checks.mjs';
+import { productize, reviewersFor, findingsOf, decisionsListOf, triageOf, stripSections } from './lib/orchestra.mjs';
+import { createRequire } from 'node:module';
 import { growthPrompt, growthPromptEn, migrateAgent, addLesson, metricLessons, extractSelfReview, levelOf, focusOf, charterFor, baselineOf, savingsOf, MIN_ACCEPT } from './lib/growth.mjs';
-import { PROVIDERS, PROVIDER_KEYS, AGENT_PROVIDERS, CATEGORIES, PRIOR_SRC, categoryOf, recordResult, estimate, pickProvider, parseCodexLine, parseAgyLine, newAcc, shellQuote, safeModel } from './lib/providers.mjs';
-import { parseUsage, parseReset, cut, validateDir, PATH_RE, norm, insideWs, outsidePaths, SENSITIVE, SAFE_SEG, isSafeReadOnly, DANGER, INSTALL, POP_NPM, POP_PY, lev, typoOf, ageText, fmtN, verdict, parseInstalls, npmSpec, classify, splitSummary, rubricOf, W, scoreTask, TEMPLATES } from './lib/policy.mjs';
+import { PROVIDERS, PROVIDER_KEYS, AGENT_PROVIDERS, CATEGORIES, PRIOR_SRC, categoryOf, recordResult, estimate, pickProvider, parseCodexLine, parseAgyLine, newAcc, shellQuote, safeModel, providerFits, cliGuide } from './lib/providers.mjs';
+import { parseUsage, parseReset, cut, validateDir, PATH_RE, norm, insideWs, outsidePaths, SENSITIVE, SAFE_SEG, isSafeReadOnly, DANGER, INSTALL, POP_NPM, POP_PY, lev, typoOf, ageText, fmtN, verdict, parseInstalls, npmSpec, classify, splitSummary, rubricOf, reviewOf, fixesOf, critiqueOf, repliesOf, decisionsOf, criteriaOf, acceptOf, W, scoreTask, TEMPLATES } from './lib/policy.mjs';
 
 const __dir = path.dirname(fileURLToPath(import.meta.url));
 const DATA = process.env.OFIS_DATA ? path.resolve(process.env.OFIS_DATA) : path.join(__dir, 'data');   // testler ayrı bir veri klasörü kullanır
@@ -187,14 +192,20 @@ const liveMode = () => !!CLAUDE && !FORCE_DEMO && claudeInfo.ok !== false;
 const cliOff = () => S.settings?.cli === false && !!CLAUDE && !FORCE_DEMO;   // kullanıcı bağlantıyı kendisi kesti (tüm CLI'ler durur)
 // bir sağlayıcı şu an kullanılabilir mi? Codex/Antigravity sadece sen açarsan (Analiz → CLI sağlayıcıları) devreye girer
 const provUsable = k => !cliOff() && (k === 'claude' ? (liveMode() || FORCE_DEMO) : !!S.settings.providers[k]?.on && (FORCE_DEMO || provInfo[k]?.ok));
-function chooseProvider(agentId, cat) {
-  const pref = S.agents[agentId]?.provider || 'auto', usable = PROVIDER_KEYS.filter(provUsable);
+function chooseProvider(agentId, cat, need = {}) {
+  const pref = S.agents[agentId]?.provider || 'auto', fit = k => k === 'claude' ? { ok: true } : providerFits(k, need, S.settings.providers?.[k] || {});
+  const usable = PROVIDER_KEYS.filter(k => provUsable(k) && fit(k).ok);
+  if (pref !== 'auto' && pref !== 'claude' && provUsable(pref) && !fit(pref).ok) return { provider: 'claude', why: `${fit(pref).why} → bu görev Claude Code ile çalışıldı` };
   if (pref !== 'auto') return usable.includes(pref) || pref === 'claude' ? { provider: pref, why: 'ajan ayarı' } : { provider: 'claude', why: `${PROVIDERS[pref].label} kullanılamıyor, Claude Code ile çalışıldı` };
   return pickProvider(S.routing, cat, usable) || { provider: 'claude', why: 'kullanılabilir başka CLI yok' };
 }
 
 // ---------- Varsayılan ajanlar ----------
 const READ = 'Read,Glob,Grep', WEB = 'WebSearch,WebFetch';
+const ASSET_TOOL = path.join(__dir, 'tools', 'assets.mjs');   // ajanların görsel/asset aracı (onay beklemeden çalışır)
+const SHOT_TOOL = path.join(__dir, 'tools', 'shot.cjs'), SHOTS = path.join(DATA, 'shots');
+const SNAPS = path.join(DATA, 'snaps'), SNAP_MAX_BYTES = 50 * 1024 * 1024, SNAP_KEEP = 20;   // görev başına anlık görüntüler (geri alma)   // görsel doğrulama: ekran görüntüleri uygulamanın veri klasöründe
+let ELECTRON = null; try { const e = createRequire(import.meta.url)('electron'); if (typeof e === 'string' && fs.existsSync(e)) ELECTRON = e; } catch {}
 const DEFAULT_AGENTS = {
   ceo:        { name: 'Defne', title: 'CEO / Proje Yöneticisi', color: '#e0a526', model: 'sonnet', turns: 10, think: true, tools: `${READ},${WEB}`,
                 directive: 'İşi en az ajanla çöz. Önce kısa araştırma yap, sonra net, kısa, ölçülebilir görevler ver. Gereksiz görev açma. Kullanıcıya kısa raporla.', memory: [] },
@@ -321,7 +332,7 @@ async function requestApproval({ project, agent, tool_name, input }) {
   const p = S.projects.find(x => x.id === project);
   const ws = p ? wsDir(p) : WORK;
   const key = approvalKey(tool_name, input);
-  const cl = classify(tool_name, input, ws);
+  const cl = classify(tool_name, input, ws, [ASSET_TOOL, SHOTS]);
   if (cl.auto) return { behavior: 'allow', updatedInput: input };                          // çalışma klasöründe zararsız okuma komutları sormadan
   const strict = cl.outside || cl.install || cl.risk === 'high';                            // dış dosya erişimi ve kurulumlar için "hep izin" geçerli değil
   if (!strict && (p?.allow?.[key] || (p?.autoLow && cl.risk === 'low'))) return { behavior: 'allow', updatedInput: input };
@@ -346,20 +357,55 @@ async function requestApproval({ project, agent, tool_name, input }) {
 }
 
 // ---------- Claude Code süreci ----------
+const DEMO_REVIEW = process.env.OFIS_DEMO_REVIEW === 'revize';   // testler: akran incelemesi öneri versin, denetçi düzeltme istesin
 function mockRun({ system, prompt }) {
   const name = (system.match(/Sen ([^,\s]+)/) || [])[1] || 'Ajan';
   let text;
-  if (/PLAN_JSON/.test(prompt)) {
-    text = JSON.stringify({ reply: 'Projeyi anladım. Önce kısa bir araştırma yapıp tasarım ve kodlama için görev dağılımı çıkardım. (DEMO modu)', research: ['Benzer sitelerde tek sayfalık yapı öne çıkıyor (demo)', 'Mobil öncelikli tasarım öneriliyor (demo)'],
+  if (/PLAN_JSON/.test(prompt) && /PROJE TÜRÜ: Oyun/.test(prompt)) {
+    text = JSON.stringify({ reply: 'Bir oyun istiyorsun: önce tasarım belgesi ve asset listesi, sonra assetler ile oyun kodu paralel yürüyecek. (DEMO modu)', vizyon: { amac: 'Kısa, eğlenceli bir tarayıcı oyunu (demo)', kitle: 'Herkes (demo)', basari: 'Klavye ve dokunmatikle oynanır, skor tutar (demo)', kapsam: 'Tek seviye (demo)' }, kabul: [{ id: 'K1', olcut: 'Oyun klavyeyle oynanır (demo)' }, { id: 'K2', olcut: 'Tüm görseller atlasla yüklenir (demo)' }], research: [],
+      tasks: [
+        { id: 't1', agent: 'designer', instruction: 'Oyun tasarım belgesi ve asset listesi yaz.', needs: [], deliverable: 'oyun-tasarimi.md' },
+        { id: 't2', agent: 'designer', instruction: 'Asset listesindeki karakter ve nesneleri piksel sanatı olarak üret, atlas oluştur.', needs: ['t1'], deliverable: 'assets/atlas.png', yetenekler: ['asset-hatti', 'svg-cizim'], kriterler: ['K2'] },
+        { id: 't3', agent: 'developer', instruction: 'Canvas ile oyun kodunu yaz, assetleri atlas.json ile yükle.', needs: ['t1'], deliverable: 'index.html, game.js', yetenekler: ['calistir-dogrula'], kriterler: ['K1', 'K2'] },
+        { id: 't4', agent: 'auditor', instruction: 'Oynanabilirliği denetle.', needs: ['t2', 't3'], deliverable: '' }],
+      needs_approval: [], questions: [] });
+  } else if (/PLAN_JSON/.test(prompt)) {
+    text = JSON.stringify({ reply: 'Projeyi anladım. Önce kısa bir araştırma yapıp tasarım ve kodlama için görev dağılımı çıkardım. (DEMO modu)', vizyon: { amac: 'Ziyaretçinin aradığını hızla bulması (demo)', kitle: 'Yerel müşteriler (demo)', basari: 'Ziyaretçi 3 tıkta iletişime geçebilir (demo)', kapsam: 'Tek sayfa site; ödeme yok (demo)' }, kabul: [{ id: 'K1', olcut: 'Ana sayfa mobilde düzgün görünür (demo)' }, { id: 'K2', olcut: 'İletişim bilgisi tek tıkla ulaşılabilir (demo)' }], research: ['Benzer sitelerde tek sayfalık yapı öne çıkıyor (demo)', 'Mobil öncelikli tasarım öneriliyor (demo)'],
       tasks: [
         { id: 't1', agent: 'researcher', instruction: 'Konuyu kısaca araştır, 5 madde.', needs: [], deliverable: 'arastirma.md' },
         { id: 't2', agent: 'designer', instruction: 'Arayüz yapısını öner.', needs: [], deliverable: 'tasarim.md' },
-        { id: 't3', agent: 'developer', instruction: 'Araştırma ve tasarıma göre ilk sürüm kodunu yaz.', needs: ['t1', 't2'], deliverable: 'index.html' },
+        { id: 't3', agent: 'developer', instruction: 'Araştırma ve tasarıma göre ilk sürüm kodunu yaz.', needs: ['t1', 't2'], deliverable: 'index.html', kriterler: ['K1', 'K2'] },
         { id: 't4', agent: 'auditor', instruction: 'Çıktıyı isteğe göre denetle.', needs: ['t3'], deliverable: '' }],
       needs_approval: ['Gerekirse npm paket kurulumu (demo)'], questions: [] });
   } else if (/DERS_YAZ/.test(prompt)) text = JSON.stringify(Object.fromEntries((prompt.match(/^(\w+) \(/gm) || []).map(k => [k.replace(/ \($/, ''), ['Çıktıyı kısa tut ve önce sonucu yaz.', 'Kullanıcı net örnek verince daha iyi sonuç çıkıyor.']]).concat([['kullanici', ['Kısa ve net yanıtlardan hoşlanıyor.']]])));
   else if (/YONERGE_ANLA/.test(prompt)) text = 'Yönergeyi şöyle anladım: verilen kurallara kısa ve net çıktılarla uyacağım. (DEMO) Netleştirmek istediğim: öncelik hız mı kalite mi?';
-  else if (/KALİTE DEĞERLENDİRMESİ/.test(prompt)) { const ag = ((prompt.match(/Değerlendirilecek ajanlar: ([\w,]+)/) || [])[1] || '').split(','); text = 'Dosyaları inceledim (demo).\n' + JSON.stringify(Object.fromEntries(ag.filter(Boolean).map(k => [k, { dogruluk: 7 + Math.floor(Math.random() * 3), tamlik: 6 + Math.floor(Math.random() * 4), talimat: 7 + Math.floor(Math.random() * 3), not: 'demo değerlendirme' }]))); }
+  else if (/EKIP_DEGERLENDIRME/.test(prompt)) {
+    const others = [...prompt.matchAll(/^\[(\w+):/gm)].map(m => m[1]).filter(k => !system.includes(`"${S.agents[k]?.title}"`));
+    text = 'Ürünü baştan sona okudum (demo).\n' + JSON.stringify(DEMO_REVIEW && others[0]
+      ? { olmus: ['Bölümler birbirini tamamlıyor (demo)'], olmamis: [{ sahip: others[0], konu: 'Giriş bölümü vizyonla çelişiyor (demo)', oneri: 'Hedef kitleye göre yeniden yaz (demo)' }], olabilir: [{ sahip: others[0], oneri: 'Kısa bir özet kutusu ekle (demo)' }] }
+      : { olmus: ['Ürün amaca hizmet ediyor (demo)'], olmamis: [], olabilir: [] });
+  }
+  else if (/ELESTIRI_YANIT/.test(prompt)) { const nos = [...prompt.matchAll(/^(\d+)\. \[/gm)].map(m => +m[1]); text = JSON.stringify({ yanitlar: nos.map((no, i) => ({ no, karar: i === nos.length - 1 && nos.length > 1 ? 'katilmiyorum' : 'katiliyorum', not: i === nos.length - 1 && nos.length > 1 ? 'kapsam dışı (demo)' : 'haklı, düzeltirim (demo)' })) }); }
+  else if (/TOPLANTI_KARAR/.test(prompt)) {
+    const its = [...prompt.matchAll(/^(\d+)\. \[(\w+) → (\w+)\][^|\n]*(?:\| yanıt: (\w+))?/gm)];
+    text = JSON.stringify({ ozet: 'Ekibin önerilerini tarttım (demo).', kararlar: its.filter(m => m[4] !== 'katilmiyorum').map(m => ({ sahip: m[3], is: `Madde ${m[1]} uygulanacak (demo)` })), reddedilen: its.filter(m => m[4] === 'katilmiyorum').map(m => ({ no: +m[1], neden: 'gerekçe ikna edici (demo)' })) });
+  }
+  else if (/AKRAN_INCELEME/.test(prompt)) text = 'Dosyaları okudum (demo).\n' + JSON.stringify(DEMO_REVIEW ? { karar: 'revize', guclu: 'yapı net (demo)', oneriler: ['Başlıkları daha açıklayıcı yap (demo)', 'Eksik bölümü tamamla (demo)'] } : { karar: 'onay', guclu: 'demo onay', oneriler: [] });
+  else if (/KALİTE DEĞERLENDİRMESİ/.test(prompt)) {
+    const ag = ((prompt.match(/Değerlendirilecek ajanlar: ([\w,]+)/) || [])[1] || '').split(',').filter(Boolean);
+    const j = Object.fromEntries(ag.map(k => [k, { dogruluk: 7 + Math.floor(Math.random() * 3), tamlik: 6 + Math.floor(Math.random() * 4), talimat: 7 + Math.floor(Math.random() * 3), not: 'demo değerlendirme' }]));
+    j.duzeltmeler = DEMO_REVIEW && !/YENİDEN DENETİM/.test(prompt) && ag[0] ? [{ ajan: ag[0], is: 'Kritik eksik bölümü ekle (demo)' }] : [];
+    const ks = [...prompt.matchAll(/^- (K\d+): /gm)].map(m => m[1]); if (ks.length) j.kabul = Object.fromEntries(ks.map((k, i) => [k, DEMO_REVIEW && i === 0 && !/YENİDEN DENETİM/.test(prompt) ? 'kaldi — demo eksik' : 'gecti — demo kanıt']));
+    text = 'Dosyaları inceledim (demo).\n' + JSON.stringify(j);
+  }
+  else if (/GERI_BILDIRIM_TRIYAJ/.test(prompt)) { const nos = [...prompt.matchAll(/^(\d+)\. \[/gm)].map(m => +m[1]); text = `Geri bildirimi süzdüm (demo).\n---TRİYAJ---\n${nos.map((n, i) => i === nos.length - 1 && nos.length > 1 ? `${n}: reddedildi — kapsam dışı (demo)` : `${n}: uygulandı — düzelttim (demo)`).join('\n')}\n---ÖZ--- Geri bildirimi daha erken iste\n---ÖZET---\n${name} geri bildirimi uyguladı (demo).`; }
+  else if (/YAPIMCI_GOREVI/.test(prompt)) text = `Ürünü baştan sona yazdım (demo).\n---KARARLAR---\n- Palet: lacivert ve turuncu (demo)\n- Yazı tipi: sistem yazı tipleri (demo)\n- Tek sayfa, bölümler anchor ile (demo)\n---ÖZ--- Kararları daha erken yaz\n---ÖZET---\n${name} ürünü yaptı (demo).`;
+  else if (/GOZDEN_GECIRME/.test(prompt)) {
+    const first = /\(tur 1\)/.test(prompt), ks = [...prompt.matchAll(/^- (K\d+): /gm)].map(m => m[1]), audit = /"kabul"/.test(prompt);
+    const j = { olmus: ['Bütünlüklü görünüyor (demo)'], bulgular: DEMO_REVIEW && first ? [{ onem: 'kritik', konu: 'Başlık hiyerarşisi zayıf (demo)', oneri: 'H1 büyüt (demo)' }, { onem: 'kucuk', konu: 'Boşluklar (demo)', oneri: '8px ızgara (demo)' }] : [] };
+    if (audit) { j.kabul = Object.fromEntries(ks.map((k, i) => [k, DEMO_REVIEW && first && i === 0 ? 'kaldi — demo eksik' : 'gecti — demo kanıt'])); j.puan = { dogruluk: 8, tamlik: 8, talimat: 8, not: 'demo' }; }
+    text = 'Ürüne baktım (demo).\n' + JSON.stringify(j);
+  }
   else if (/SORU_SERBEST/.test(prompt) && name === 'Kaan' && !/SORU-CEVAP/.test(prompt)) text = 'SORU@designer: Ana renk paleti hangisi olsun?';
   else if (/SORU\/CEVAP_ISTEGI/.test(prompt)) text = 'Sıcak kahve tonları (#6b4226, #f5e6d3) öneriyorum.';
   else {
@@ -449,7 +495,7 @@ function runClaude({ agentId, p, prompt, system, model, tools, allow, turns, mod
 function runOther(provider, { agentId, p, prompt, system, phase, cwd, think }) {
   return new Promise(resolve => {
     const cfg = S.settings.providers[provider] || {}, model = safeModel(cfg.model);
-    const full = `${system}\n\n---\n${prompt}`;
+    const full = `${system}${cliGuide(provider, { phase, trust: !!cfg.trust })}\n\n---\n${prompt}`;
     let args, viaStdin = false;
     if (provider === 'codex') {   // https://developers.openai.com/codex/noninteractive
       args = ['exec', '--json', '--skip-git-repo-check', '--ephemeral', '-C', cwd, '-s', phase === 'work' ? 'workspace-write' : 'read-only', '-c', 'approval_policy=never'];
@@ -501,7 +547,7 @@ function runOther(provider, { agentId, p, prompt, system, phase, cwd, think }) {
 }
 
 // phase: 'plan' (araştırma, salt-okunur) | 'work' (çalışma klasöründe üretim) | 'text' (araçsız kısa metin)
-async function ask(p, agentId, prompt, { purpose = 'görev', phase = 'text', model, turns, cat, provider } = {}) {
+async function ask(p, agentId, prompt, { purpose = 'görev', phase = 'text', model, turns, cat, provider, extraTools = [] } = {}) {
   const a = S.agents[agentId];
   const dir = p ? wsDir(p) : WORK;
   const system = `Sen ${a.name}, bu sanal ofiste "${a.title}" rolündesin. Yanıtların kısa ve öz olsun; selamlama, özür, tekrar yok. ${S.settings.lang === 'en' ? 'Write in English.' : 'Türkçe yaz.'}\nYÖNERGE: ${a.directive}` +
@@ -512,7 +558,7 @@ async function ask(p, agentId, prompt, { purpose = 'görev', phase = 'text', mod
     (phase !== 'text' ? `\nGÜVENLİK: Sadece çalışma klasöründeki dosyalarla çalış. Kullanıcı izni olmadan bu klasörün dışındaki hiçbir dosyayı/klasörü okuma, yazma veya listeleme; gerekiyorsa izin iste. Paket kurmadan önce gerçekten gerekli mi düşün, yerleşik yolları tercih et.` : '');
   const cfg = phase === 'text' ? { tools: '', allow: [], turns: 1, mode: 'default', model: model || (agentId === 'ceo' ? a.model : 'haiku') }
     : phase === 'plan' ? { tools: `${READ},${WEB}`, allow: WEB.split(','), turns: turns || a.turns, mode: 'default', model: model || a.model }
-    : { tools: a.tools, allow: a.tools.split(',').filter(t => /^(WebSearch|WebFetch)$/.test(t)), turns: turns || a.turns, mode: 'acceptEdits', model: model || a.model };
+    : { tools: [...new Set([...a.tools.split(','), ...extraTools])].filter(Boolean).join(','), allow: a.tools.split(',').filter(t => /^(WebSearch|WebFetch)$/.test(t)), turns: turns || a.turns, mode: 'acceptEdits', model: model || a.model };
   // token bütçesi: dolduysa plan/iş çağrıları durur (ders çıkarma gibi kısa metin çağrıları açık kalır)
   if (p && p.budget && (p.spent || 0) >= p.budget && phase !== 'text') {
     if (!p.cancelled) { p.cancelled = true; post(p, 'ceo', 'user', `Token bütçesi doldu (${p.spent}/${p.budget}). Devam etmek için bütçeyi artırıp "Devam et"e bas.`, { budgetWarn: 1 }); emit('notify', { kind: 'budget', text: 'Token bütçesi doldu' }); }
@@ -521,19 +567,24 @@ async function ask(p, agentId, prompt, { purpose = 'görev', phase = 'text', mod
   if (cliOff()) return { id: uid(), response: 'Hata: CLI bağlantısı kapalı', tin: 0, tout: 0, tcache: 0, ms: 0, error: 'CLI bağlantısı kapalı', turns: 0, maxTurns: 0, subtype: 'offline' };
   // hangi CLI? kısa metin çağrıları hep Claude; plan/iş çağrılarında ajan ayarı veya öğrenen yönlendirici seçer
   cat ||= categoryOf(agentId);
-  const pick = phase === 'text' ? { provider: 'claude', why: 'kısa metin' } : provider ? { provider, why: 'zorunlu' } : chooseProvider(agentId, cat);
+  const need = { web: cat === 'arastirma' && /WebSearch|WebFetch/.test(cfg.tools), bash: extraTools.includes('Bash') };   // bu görevin olmazsa olmazları (web: araştırma VE ajanın web aracı var)
+  const forcedFit = provider && provider !== 'claude' ? providerFits(provider, need, S.settings.providers?.[provider] || {}) : { ok: true };
+  const pick = phase === 'text' ? { provider: 'claude', why: 'kısa metin' } : provider && forcedFit.ok ? { provider, why: 'zorunlu' } : provider ? { provider: 'claude', why: `${forcedFit.why} → Claude Code ile çalışıldı` } : chooseProvider(agentId, cat, need);
   const prov = pick.provider;
   if (prov === 'claude' && !liveMode() && !FORCE_DEMO) return { id: uid(), response: 'Hata: Claude Code bağlı değil', tin: 0, tout: 0, tcache: 0, ms: 0, error: CLAUDE ? 'Claude Code girişi yok (terminalde "claude auth login")' : 'Claude Code bulunamadı', turns: 0, maxTurns: 0, subtype: 'offline', provider: prov };
   if (prov !== 'claude' && !['ajan ayarı', 'zorunlu'].includes(pick.why)) logEv(p, agentId, 'task', `${PROVIDERS[prov].label} seçildi — ${pick.why}`);
+  else if (/Claude Code ile çalışıldı$/.test(pick.why)) logEv(p, agentId, 'task', pick.why);   // uygun olmayan CLI yerine Claude: nedeni görünsün
+  const sk = phase === 'text' ? [] : pickSkills(agentId, a, prompt);
+  const fullSystem = system + skillsPrompt(sk);
   const t0 = Date.now(); status(agentId, 'working', purpose);
   const demo = FORCE_DEMO;
-  const res = await gate(async () => demo ? (await new Promise(r => setTimeout(r, Number(process.env.OFIS_DEMO_MS) || 3500 + Math.random() * 2500)), mockRun({ system, prompt }))
-    : prov === 'claude' ? runClaude({ agentId, p, prompt, system, cwd: dir, think: phase !== 'text' && a.think !== false, ...cfg })
-    : runOther(prov, { agentId, p, prompt, system, phase, cwd: dir, think: a.think !== false }));
+  const res = await gate(async () => demo ? (await new Promise(r => setTimeout(r, Number(process.env.OFIS_DEMO_MS) || 3500 + Math.random() * 2500)), mockRun({ system: fullSystem, prompt }))
+    : prov === 'claude' ? runClaude({ agentId, p, prompt, system: fullSystem, cwd: dir, think: phase !== 'text' && a.think !== false, ...cfg })
+    : runOther(prov, { agentId, p, prompt, system: fullSystem, phase, cwd: dir, think: a.think !== false }));
   if (prov !== 'claude') cfg.model = prov + (safeModel(S.settings.providers[prov]?.model) ? ':' + S.settings.providers[prov].model : '');
   status(agentId, res.error ? (res.limit ? 'limit' : 'error') : 'idle', res.error ? cut(res.error, 60) : '');
   if (res.error) logEv(p, agentId, 'error', res.error);
-  const req = { id: uid(), ts: Date.now(), projectId: p?.id, agent: agentId, provider: prov, cat, why: pick.why, model: cfg.model, purpose, phase, system: cut(system, 4000), prompt: cut(prompt, 6000),
+  const req = { id: uid(), ts: Date.now(), projectId: p?.id, agent: agentId, provider: prov, cat, why: pick.why, model: cfg.model, purpose, phase, skills: sk.map(x => x.name), system: cut(fullSystem, 6000), prompt: cut(prompt, 6000),
     userStop: res.userStop || undefined, response: cut(String(res.text || ''), 6000), tin: res.tin, tout: res.tout, tcache: res.tcache || 0, ms: Date.now() - t0, demo: !!res.demo, error: res.error, turns: res.turns, maxTurns: cfg.turns, subtype: res.subtype };
   S.requests.push(req); if (S.requests.length > 300) S.requests.splice(0, S.requests.length - 300);
   const now0 = new Date(), day = now0.getFullYear() + '-' + String(now0.getMonth() + 1).padStart(2, '0') + '-' + String(now0.getDate()).padStart(2, '0'), dd = (S.daily[day] ||= { runs: 0, tin: 0, tout: 0, tcache: 0 });
@@ -562,39 +613,86 @@ async function runTask(p, t, brief, deps, done) {
   const roster = Object.keys(S.agents).filter(k => k !== t.agent).join('/');
   const isAudit = t.agent === 'auditor';
   const toReview = isAudit ? [...new Set(Object.values(done).map(d => d.agent))].filter(k => k !== 'auditor') : [];
-  const base = `GÖREV: ${t.instruction}${t.deliverable ? `\nBEKLENEN ÇIKTI: ${t.deliverable}` : ''}\nPROJE TANIMI: ${cut(brief, 1200)}` + (p.notes ? `\nPROJE NOTLARI: ${cut(p.notes, 800)}` : '') +
-    (deps.length ? '\nÖNCEKİ ÇIKTILAR (özet; ayrıntı için çalışma klasöründeki dosyalara bak):\n' + deps.map(d => `[${d.agent}:${S.agents[d.agent].title}] ${d.summary}`).join('\n') : '');
-  const rubric = isAudit && toReview.length ? `\n\nKALİTE DEĞERLENDİRMESİ: Çalışma klasöründeki dosyaları OKU ve ajan özetlerini karşılaştır. Değerlendirilecek ajanlar: ${toReview.join(',')}\nHer ajan için 1-10 puan (1-3 kullanılamaz, 4-6 kısmen, 7-8 iyi, 9-10 kusursuz): "dogruluk" (hatasız/doğru mu), "tamlik" (istenenin tamamı var mı), "talimat" (göreve ve kullanıcı isteğine uyum). Somut kanıt göstermeden 8'in üstünü verme.\nYanıtının EN SON satırı SADECE şu JSON olsun: {"<ajan anahtarı>":{"dogruluk":n,"tamlik":n,"talimat":n,"not":"somut kanıt, en fazla 12 kelime"}}` : '';
+  // aynı anda çalışan ekip arkadaşları: birbirlerinin dosyalarını ezmesinler, işi bölüşsünler
+  const depIds = new Set(t.needs || []);
+  const mates = isAudit ? [] : (p.board || []).filter(x => x.id !== t.id && !depIds.has(x.id) && ['bekliyor', 'çalışıyor'].includes(x.status) && x.agent !== 'auditor');
+  const base = `GÖREV: ${t.instruction}${t.deliverable ? `\nBEKLENEN ÇIKTI: ${t.deliverable}` : ''}\nPROJE TANIMI: ${cut(brief, 1200)}` + visionText(p) + (p.notes ? `\nPROJE NOTLARI: ${cut(p.notes, 800)}` : '') +
+    (deps.length ? '\nÖNCEKİ ÇIKTILAR (özet; ayrıntı için çalışma klasöründeki dosyalara bak):\n' + deps.map(d => `[${d.agent}:${S.agents[d.agent].title}] ${d.summary}`).join('\n') : '') +
+    (mates.length ? '\nEKİP (seninle paralel çalışanlar): ' + mates.map(x => `${S.agents[x.agent]?.title || x.agent} → ${x.deliverable || cut(x.instruction, 60)}`).join('; ') + '\nOnların dosyalarına yazma; ortak bir karar gerekiyorsa varsayımını kendi çıktında açıkça belirt.' : '');
+  const caps = t.caps || [], capText = capabilityPrompt(caps, { tool: ASSET_TOOL });
+  const myCrit = (p.criteria || []).filter(c => (t.criteria || []).includes(c.id));
+  const critText = myCrit.length && !isAudit ? '\nBU GÖREVİN KARŞILAMASI GEREKEN KABUL ÖLÇÜTLERİ (teslimden önce her birini kendin kontrol et):\n' + myCrit.map(c => `- ${c.id}: ${c.olcut}`).join('\n') : '';
+  const rubric = isAudit && toReview.length ? `\n\nKALİTE DEĞERLENDİRMESİ: Çalışma klasöründeki dosyaları OKU ve ajan özetlerini karşılaştır. Değerlendirilecek ajanlar: ${toReview.join(',')}\nHer ajan için 1-10 puan (1-3 kullanılamaz, 4-6 kısmen, 7-8 iyi, 9-10 kusursuz): "dogruluk" (hatasız/doğru mu), "tamlik" (istenenin tamamı var mı), "talimat" (göreve ve kullanıcı isteğine uyum). Somut kanıt göstermeden 8'in üstünü verme.\n` +
+    ((p.criteria || []).length ? `KABUL ÖLÇÜTLERİ (her birini dosyalara bakarak tek tek kontrol et; kanıt göster):\n${p.criteria.map(c => `- ${c.id}: ${c.olcut}`).join('\n')}\nJSON'a "kabul" alanı ekle: {"K1":"gecti — kanıt","K2":"kaldi — ne eksik"}. Kalan her ölçütü düzeltmeler listesine de ekle.\n` : '') +
+    `Dosya yazamazsın; bulgularını yanıtında ver. Bulduğun her önemli sorunu (kritik/orta) "duzeltmeler" listesine, düzeltmesi gereken ajana atayarak, dosya/bölüm adıyla ve uygulanabilir şekilde yaz; ajan başına en fazla 5. Küçük zevk farklarını yazma; sorun yoksa liste boş olsun.\n` +
+    `Yanıtının EN SON satırı SADECE şu JSON olsun: {"<ajan anahtarı>":{"dogruluk":n,"tamlik":n,"talimat":n,"not":"somut kanıt, en fazla 12 kelime"},"duzeltmeler":[{"ajan":"<ajan anahtarı>","is":"ne, nerede, nasıl düzeltilecek"}]}` : '';
   const tail = `\n\nSonda "---ÖZET---" yazıp 40 kelimelik özet ekle.` + rubric;
   const askLine = isAudit ? '' : `\nSORU_SERBEST: Sadece işini ENGELLEYEN bir bilgi eksiğin varsa hiçbir araç kullanmadan yanıtın TEK satır olsun: "SORU@<${roster}>: kısa soru". Aksi halde soru sorma, işi yap.`;
-  const bt = (p.board || []).find(x => x.id === t.id); if (bt) { bt.status = 'çalışıyor'; bt.startedAt = Date.now(); save(); emit('project', p); }
+  const bt = (p.board || []).find(x => x.id === t.id); if (bt && !isAudit) bt.snap = snapshot(p, t.id); if (bt) { bt.status = 'çalışıyor'; bt.startedAt = Date.now(); save(); emit('project', p); }
   logEv(p, t.agent, 'task', 'Görev başladı: ' + cut(t.instruction, 110));
   const m = { agent: t.agent, deliverable: t.deliverable, turns: 0, maxTurns: 0, ms: 0, error: false, subtype: 'success', questions: 0, denials0: (p.denials || {})[t.agent] || 0 };
   const add = r => { m.turns += r.turns || 0; m.maxTurns += r.maxTurns || 0; m.ms += r.ms; if (r.error) m.error = true; if (r.subtype && r.subtype !== 'success') m.subtype = r.subtype; if (r.provider) m.provider = r.provider; };
   const cat = m.cat = categoryOf(t.agent, t.instruction, t.deliverable);
-  let r = await ask(p, t.agent, base + askLine + tail, { purpose: cut(t.instruction, 40), phase: 'work', cat }); add(r);
+  const xt = capTools(caps);
+  const vText = isAudit ? verifyText(await verifyProject(p, t.id)) : '';
+  const builderText = t.role === 'yapimci' && !t.kind ? builderPrompt(p, t, deps) : '';
+  const prior = t.kind === 'düzeltme' ? Object.values(done).filter(d => d.agent === t.agent && !d.fix && d.body).map(d => cut(d.body, 900)).join('\n---\n') : '';
+  const priorText = prior ? `\nÖNCEKİ RAPORUN (bu işi sen yaptın; dosyaları baştan keşfetme, yalnızca kararla ilgili yerleri aç ve düzenle):\n${cut(prior, 1800)}` : '';
+  const turns = t.role === 'yapimci' ? Math.max(S.agents[t.agent].turns || 24, 40) : undefined;   // tüm ürünü yazan yapımcıya daha çok adım
+  let r = await ask(p, t.agent, base + builderText + critText + capText + vText + priorText + askLine + tail, { purpose: cut(t.instruction, 40), phase: 'work', cat, extraTools: xt, turns, provider: t.provider }); add(r);   // yapımcının düzeltmeleri aynı CLI'de kalır
   if (r.error && r.provider && r.provider !== 'claude' && r.subtype !== 'budget' && !p.cancelled && provUsable('claude')) {
     // başka CLI başarısız oldu: bunu öğren (düşük puan) ve görevi Claude Code ile bir kez daha dene
     if (!r.userStop) recordResult(S.routing, r.provider, cat, 1, { failed: true }); m.fallback = r.provider;
     post(p, t.agent, 'ceo', r.userStop ? `${PROVIDERS[r.provider].label} bağlantısı kesildi; göreve Claude Code ile devam ediyorum.` : `${PROVIDERS[r.provider].label} bu görevde hata verdi (${cut(r.error, 120)}). Claude Code ile yeniden deniyorum.`);
     m.error = false; m.subtype = 'success';
-    r = await ask(p, t.agent, base + askLine + tail, { purpose: cut(t.instruction, 40), phase: 'work', cat, provider: 'claude' }); add(r);
+    r = await ask(p, t.agent, base + capText + askLine + tail, { purpose: cut(t.instruction, 40), phase: 'work', cat, provider: 'claude', extraTools: xt }); add(r);
   }
-  if (bt) { bt.provider = m.provider; bt.cat = cat; }
+  if (bt) { bt.provider = m.provider; bt.cat = cat; bt.skills = r.skills || []; }
   const q = r.response.match(/^SORU@(\w+):\s*(.+)$/m);
   if (q && S.agents[q[1].toLowerCase()] && q[1].toLowerCase() !== t.agent) {
     const to = q[1].toLowerCase(); m.questions++;
     post(p, t.agent, to, 'Soru: ' + q[2], { reqId: r.id });
     const a = await ask(p, to, `SORU/CEVAP_ISTEGI\n${S.agents[t.agent].title} sana soruyor (görev: ${cut(t.instruction, 150)}): ${q[2]}\nEn fazla 50 kelimeyle yanıtla.`, { purpose: 'soruya yanıt', phase: 'text', model: S.agents[to].model });
     post(p, to, t.agent, a.response, { reqId: a.id });
-    r = await ask(p, t.agent, base + `\nSORU-CEVAP: ${q[2]} → ${cut(a.response, 400)}` + tail, { purpose: cut(t.instruction, 40), phase: 'work', cat, provider: m.provider }); add(r);
+    r = await ask(p, t.agent, base + capText + `\nSORU-CEVAP: ${q[2]} → ${cut(a.response, 400)}` + tail, { purpose: cut(t.instruction, 40), phase: 'work', cat, provider: m.provider, extraTools: xt }); add(r);
   }
-  const sr = extractSelfReview(r.response); let text = sr.text;
-  if (sr.review && !m.error) addLesson(S.agents[t.agent], sr.review, 'oz');
-  if (isAudit) { const rb = rubricOf({ response: text }); if (rb) { text = rb.rest; for (const [k, v] of Object.entries(rb.json)) if (S.agents[k.toLowerCase()] && v && typeof v === 'object') (p.quality ||= {})[k.toLowerCase()] = v; } }
-  const { body, summary } = splitSummary(text);
+  let fixes = null, accept = null, newDecisions = null, tri = [];
+  const parse = r => {
+    const sr = extractSelfReview(r.response); let text = sr.text;
+    if (t.role === 'yapimci') { const ds = decisionsListOf(text); if (ds.length) newDecisions = ds; tri = triageOf(text); text = stripSections(text); }
+    if (sr.review && !m.error) addLesson(S.agents[t.agent], sr.review, 'oz');
+    if (isAudit) { const rb = rubricOf({ response: text }); if (rb) { text = rb.rest; fixes = fixesOf(rb.json); accept = acceptOf(rb.json, p.criteria || []); for (const [k, v] of Object.entries(accept)) (p.acceptance ||= {})[k] = { ...v, ts: Date.now() }; for (const [k, v] of Object.entries(rb.json)) if (S.agents[k.toLowerCase()] && v && typeof v === 'object' && !Array.isArray(v)) (p.quality ||= {})[k.toLowerCase()] = v; } }
+    return splitSummary(text);
+  };
+  let { body, summary } = parse(r);
+  // akran incelemesi: çıktıyı devralacak ekip arkadaşı dosyaları okur, somut öneri verir; gerekirse sahibi bir kez düzeltir
+  const rev = t.reviewer;
+  if (rev && rev !== t.agent && S.agents[rev] && !m.error && !p.cancelled && !cliOff()) {
+    if (bt) { bt.phase = 'inceleme'; bt.reviewer = rev; save(); emit('project', p); }
+    logEv(p, rev, 'task', `${S.agents[t.agent].title} çıktısını inceliyor`);
+    const rq = await ask(p, rev, `AKRAN_INCELEME\nBu projede ${S.agents[rev].title} olarak ${S.agents[t.agent].title} (${S.agents[t.agent].name}) ekip arkadaşının çıktısını inceliyorsun; sonraki adımda bu çıktının üzerine sen çalışacaksın.\n` +
+      `İNCELENEN GÖREV: ${t.instruction}${t.deliverable ? `\nBEKLENEN ÇIKTI: ${t.deliverable}` : ''}\nARKADAŞININ ÖZETİ: ${summary}\nPROJE TANIMI: ${cut(brief, 1000)}\n` +
+      `Çalışma klasöründeki ilgili dosyaları OKU. Kendi uzmanlığın açısından projeyi gerçekten daha iyi yapacak, dosya/bölüm adı veren, uygulanabilir önerileri yaz. Genel övgü, belirsiz tavsiye veya zevk farkı yazma. Hata, eksik ya da senin işini zorlaştıracak bir sorun yoksa "onay" ver.\n` +
+      `Yanıtının EN SON satırı SADECE şu JSON olsun: {"karar":"onay" veya "revize","guclu":"en güçlü yanı, en fazla 12 kelime","oneriler":["en fazla 5 somut öneri"]}`,
+      { purpose: 'akran incelemesi', phase: 'plan', cat: categoryOf(rev, 'inceleme denetim review', '') });
+    const rv = !rq.error && reviewOf(rq.response);
+    if (rv) {
+      if (bt) bt.review = { by: rev, karar: rv.karar, guclu: rv.guclu, oneriler: rv.oneriler };
+      post(p, rev, t.agent, rv.karar === 'revize' ? `Çıktını inceledim${rv.guclu ? ' — güçlü yanı: ' + rv.guclu : ''}. Önerilerim:\n` + rv.oneriler.map(x => '• ' + x).join('\n') : `Çıktını inceledim, onaylıyorum.${rv.guclu ? ' Güçlü yanı: ' + rv.guclu : ''}`, { reqId: rq.id, review: rv.karar });
+      if (rv.karar === 'revize' && !p.cancelled) {
+        if (bt) { bt.phase = 'düzeltme'; save(); emit('project', p); }
+        logEv(p, t.agent, 'task', `Akran önerilerini uyguluyor (${rv.oneriler.length})`);
+        const r2 = await ask(p, t.agent, base + capText + `\nAZ ÖNCEKİ RAPORUN (dosyaları baştan keşfetme, yalnızca önerilerle ilgili yerleri aç):\n${cut(body, 1200)}` + `\nAKRAN GERİ BİLDİRİMİ — ${S.agents[rev].title} (${S.agents[rev].name}) çıktını inceledi ve şunları öneriyor:\n` + rv.oneriler.map(x => '- ' + x).join('\n') +
+          `\nBu önerileri mevcut dosyalarında UYGULA (baştan yazma, düzenle). Katılmadığın bir öneri varsa uygulamadan tek cümleyle gerekçesini yaz.` + tail,
+          { purpose: 'akran önerilerini uyguluyor', phase: 'work', cat, provider: m.provider, extraTools: xt }); add(r2);
+        if (!r2.error) { r = r2; ({ body, summary } = parse(r2)); if (bt) bt.review.applied = true; }
+      }
+    }
+    if (bt) { delete bt.phase; save(); emit('project', p); }
+  }
   m.denials = ((p.denials || {})[t.agent] || 0) - m.denials0; m.delivered = m.error ? 0 : deliveryRatio(p, t.deliverable);
-  done[t.id] = { id: t.id, agent: t.agent, summary, body, metrics: m };
+  done[t.id] = { id: t.id, agent: t.agent, summary, body, metrics: m, fix: !!t.kind, fixes, accept, triage: tri };
+  if (newDecisions) { p.decisions = newDecisions; post(p, t.agent, 'all', 'Verdiğim kararlar (ekip bunlara göre değerlendirecek):\n' + newDecisions.map(x => '• ' + x).join('\n'), { meet: 1 }); }
   if (bt && bt.status !== 'iptal') { bt.status = m.error ? 'hata' : 'bitti'; bt.endedAt = Date.now(); bt.summary = summary; bt.metrics = { ...m }; bt.turns = m.turns; save(); emit('project', p); }
   if (!m.error) status(t.agent, 'done', 'tamamlandı');
   logEv(p, t.agent, m.error ? 'error' : 'task', (m.error ? 'Görev hata ile bitti: ' : 'Görev tamamlandı: ') + cut(summary, 110));
@@ -605,7 +703,7 @@ async function runTask(p, t, brief, deps, done) {
 function scoreProject(p, done) {
   const lines = [];
   for (const d of Object.values(done)) {
-    if (d.agent === 'auditor' || !d.metrics) continue;
+    if (d.agent === 'auditor' || !d.metrics || d.fix) continue;   // düzeltme turları ayrı puanlanmaz; kalitesi yeniden denetimle asıl göreve yansır
     const { score, parts, note } = scoreTask(d.metrics, (p.quality || {})[d.agent]);
     const ag = S.agents[d.agent], lv0 = levelOf(ag).index;
     const why = Object.entries(parts).map(([k, v]) => `${k[0].toUpperCase() + k.slice(1)} ${v}`).join(' · ') + (note ? ` — ${note}` : '');
@@ -620,6 +718,15 @@ function scoreProject(p, done) {
   if (lines.length) post(p, 'ceo', 'user', 'Puan raporu (ölçülebilir metrikler)\n' + lines.join('\n'), { score: 1 });
 }
 
+// ortak ürün vizyonu: CEO planla birlikte yazar, tüm ajanların istemine ve ekip toplantısına girer
+function visionOf(v) {
+  if (!v || typeof v !== 'object') return null;
+  const o = Object.fromEntries(['amac', 'kitle', 'basari', 'kapsam', 'tarz', 'yapi'].map(k => [k, cut(String(v[k] || '').trim(), 240)]).filter(([, x]) => x));
+  return Object.keys(o).length ? o : null;
+}
+const VIS_LBL = { amac: 'Amaç', kitle: 'Kitle', basari: 'Başarı ölçütü', kapsam: 'Kapsam', tarz: 'Tarz', yapi: 'Yapı' };
+const visionText = p => p.vision ? '\nORTAK ÜRÜN VİZYONU (tüm ekip buna hizmet eder; kendi parçanı bütünle uyumlu yap):\n' + Object.entries(p.vision).map(([k, v]) => `- ${VIS_LBL[k] || k}: ${v}`).join('\n') : '';
+
 // 1) Kullanıcı projeyi anlatır → CEO araştırır, plan çıkarır, onay ister
 async function handleUser(p, text, { revise } = {}) {
   const roster = Object.entries(S.agents).filter(([k, a]) => k !== 'ceo' && !a.external).map(([k, a]) => `${k}=${a.title} (araçlar: ${a.tools})`).join('; ');
@@ -627,56 +734,341 @@ async function handleUser(p, text, { revise } = {}) {
   const brief = revise ? p.brief : text; if (!revise) p.brief = [p.brief, text].filter(Boolean).join('\n').slice(-3000);
   const ctx = (p.summary ? `\nPROJENİN ŞU ANKİ DURUMU (önceki turlar): ${p.summary}` : '') + (p.notes ? `\nPROJE NOTLARI (kullanıcı): ${cut(p.notes, 800)}` : '');
   const files = listFiles(wsDir(p)); const fctx = files.length ? `\nÇALIŞMA KLASÖRÜNDEKİ DOSYALAR: ${files.slice(0, 25).join(', ')}` : '';
-  const planReq = await ask(p, 'ceo', `PLAN_JSON\nKullanıcının proje tanımı/isteği: """${revise ? p.brief : text}"""${revise ? `\nKULLANICININ PLAN HAKKINDAKİ DÜZELTMESİ: """${revise}"""` : ''}${ctx}${fctx}\nEkip: ${roster}\n` +
+  const planReq = await ask(p, 'ceo', `PLAN_JSON\nKullanıcının proje tanımı/isteği: """${revise ? p.brief : text}"""${revise ? `\nKULLANICININ PLAN HAKKINDAKİ DÜZELTMESİ: """${revise}"""` : ''}${ctx}${fctx}\nEkip: ${roster}${catalogPrompt((revise ? p.brief : text) + ' ' + (revise || ''), Object.keys(S.agents))}\n` +
     `Önce gerekiyorsa kısa bir araştırma yap (en fazla 3 web araması), sonra planı çıkar.\n` +
-    `Yanıtın SADECE JSON olsun: {"reply":"kullanıcıya 2-3 cümle: neyi anladın, nasıl ilerleyeceksin","research":["en fazla 5 kısa bulgu"],"tasks":[{"id":"t1","agent":"<ekip anahtarı>","instruction":"net kısa görev","needs":["önceki görev id"],"deliverable":"çıktı dosyası adı"}],"needs_approval":["çalışırken izin isteyebilecek kurulum/indirme/komutlar, varsa"],"questions":["kritik eksik bilgi varsa en fazla 2 soru"]}\n` +
-    `Kurallar: sadece gerçekten gereken ajanları kullan, en fazla 6 görev, bağımsız görevlerde needs boş olsun. 2 veya daha fazla görevli işlerde son görev olarak denetçiyi (auditor) ekle. Selamlaşma/soru ise tasks boş bırak ve reply'de cevap ver. Kritik bilgi eksikse tasks boş, questions dolu olsun.`,
+    `Yanıtın SADECE JSON olsun: {"reply":"kullanıcıya 2-3 cümle: neyi anladın, nasıl ilerleyeceksin","vizyon":{"amac":"ürün kimin hangi sorununu çözecek, 1 cümle","kitle":"birincil kullanıcılar","basari":"bitmiş ve başarılı sayılması için ölçülebilir ölçüt","kapsam":"bu turda var olacaklar / olmayacaklar","tarz":"YARATICI YÖN: ruh hali, renk fikri, tipografi, görsel dil, örnek/benzer referans","yapi":"sayfa/ekran yapısı ve bölümleri sırasıyla"},"kabul":[{"id":"K1","olcut":"gözlemlenebilir, kontrol edilebilir ölçüt"}],"research":["en fazla 5 kısa bulgu"],"tasks":[{"id":"t1","agent":"<ekip anahtarı>","instruction":"net kısa görev","needs":["önceki görev id"],"deliverable":"çıktı dosyası adı","yetenekler":["gerekiyorsa yetenek id"],"kriterler":["bu görevin karşıladığı kabul ölçütü id'leri"]}],"needs_approval":["çalışırken izin isteyebilecek kurulum/indirme/komutlar, varsa"],"questions":["kritik eksik bilgi varsa en fazla 2 soru"]}\n` +
+    `BÜTÜNCÜL DÜŞÜN: Projeyi sadece ön yüz/görsel iş olarak değil, kullanıcıya değer üreten BÜTÜN bir ürün olarak ele al: amaç ve kitle (araştırma), içerik ve dil (metin), deneyim ve görsel (tasarım), teknik altyapı (kod, veri, çalıştırma ve yayına alma), kalite (denetim). İşin gerektirdiği her uzmanlığı kullan, gerektirmeyeni ekleme. Vizyonu tüm ekip görecek ve ekip sonda ürünü bu vizyona göre birlikte değerlendirecek.\n` +
+    `ÜRÜN MODELİ: Site/uygulama/oyun gibi bir ürünü TEK bir yapımcı (developer) baştan sona yazar — tasarımı da kodla birlikte o yapar. Ürünü parçalara bölüp farklı ajanlara yazdırma (paralel yazanlar birbirinin kararlarını göremez, sonuç tutarsız olur). Araştırmacı, yazar ve tasarımcı yapımcıya GİRDİ belgesi hazırlar (.md: bulgular, sayfa metinleri, tasarım yönü); tasarımcı ve denetçi sonra ürünün ekran görüntülerine bakarak gözden geçirir, yapımcı geri bildirimi süzüp uygular. Vizyondaki "tarz" ve "yapi" yapımcının yaratıcı yönergesidir: somut yaz.\n` +
+    `YAŞAM DÖNGÜSÜ: (1) Gereksinim → 3-8 KABUL ÖLÇÜTÜ yaz: her biri gözlemlenebilir ve kontrol edilebilir olsun (ör. "Mobilde menü açılıp kapanıyor", "İletişim formu hatalı e-postayı reddediyor"); belirsiz ifade ("güzel olsun") yazma. (2) Sözleşme → birden fazla kişinin aynı ürüne katkı verdiği işlerde İLK görev ortak bir sözleşme belgesi olsun (dosya yapısı, dosya/sınıf/kare adları, renk-yazı tokenları, veri biçimleri) ve ona dayanan görevler needs ile ona bağlansın. (3) Uygulama → sözleşmeye göre paralel. (4) Doğrulama → denetçi her kabul ölçütünü tek tek kontrol eder; ekip sonra toplanıp düzeltir. Her ölçüt en az bir görevin "kriterler" alanında olsun.\n` +
+    `Kurallar: en fazla 6 görev. PARALELLİK: needs'e yalnızca o çıktıyı OKUMADAN yapılamayacak önceki görevleri yaz; birbirine gerçekten bağlı olmayan işler (ör. araştırma ile tasarım, metin ile görsel yapı) aynı anda yürüsün diye needs boş olsun. Aynı anda çalışan görevler FARKLI dosyalara yazsın. Her instruction'da ne yapılacağını ve kabul ölçütünü (bitmiş sayılması için ne olmalı) 1-3 cümleyle somut yaz. 2 veya daha fazla görevli işlerde son görev olarak denetçiyi (auditor) ekle; ekip birbirinin çıktısını zaten inceleyip öneri verecek ve denetçinin bulguları ayrıca düzeltilecek, bu yüzden ayrı 'gözden geçir/düzelt' görevi ekleme. Selamlaşma/soru ise tasks boş bırak ve reply'de cevap ver. Kritik bilgi eksikse tasks boş, questions dolu olsun.`,
     { purpose: 'araştırma ve plan', phase: 'plan' });
   let plan; try { plan = JSON.parse(planReq.response.match(/\{[\s\S]*\}/)[0]); } catch { plan = { reply: planReq.response, tasks: [] }; }
-  const tasks = (plan.tasks || []).filter(t => S.agents[t.agent] && !S.agents[t.agent].external && t.agent !== 'ceo').slice(0, 6);
+  const ceoCaps = (plan.tasks || []).some(t => Array.isArray(t.yetenekler) && t.yetenekler.length);   // CEO yetenek atadıysa karar onundur
+  const tasks = (plan.tasks || []).filter(t => S.agents[t.agent] && !S.agents[t.agent].external && t.agent !== 'ceo').slice(0, 6).map(t => ({ ...t, caps: capsForTask(t, t.agent, `${p.brief} ${text || ""}`, { auto: !ceoCaps }) }));
   const qs = (plan.questions || []).filter(Boolean);
   if (!tasks.length) { post(p, 'ceo', 'user', [plan.reply || 'Tamam.', ...qs.map(q => '• ' + q)].join('\n'), { reqId: planReq.id }); save(); emit('project', p); return; }
-  p.pendingPlan = { id: uid(), tasks, research: (plan.research || []).slice(0, 5), needs: (plan.needs_approval || []).filter(Boolean), reply: plan.reply || '', questions: qs };
+  const criteria = criteriaOf(plan.kabul), cids = new Set(criteria.map(c => c.id));
+  for (const t of tasks) t.criteria = (Array.isArray(t.kriterler) ? t.kriterler : []).map(x => String(x).toUpperCase()).filter(x => cids.has(x));
+  const orch = productize(tasks, S.agents);   // ürün modu: tek yapımcı + girdiler + gözden geçirme döngüsü
+  p.pendingPlan = { id: uid(), tasks: orch.tasks, mode: orch.mode, criteria, vision: visionOf(plan.vizyon), research: (plan.research || []).slice(0, 5), needs: (plan.needs_approval || []).filter(Boolean), reply: plan.reply || '', questions: qs };
   post(p, 'ceo', 'user', plan.reply || 'Plan hazır.', { reqId: planReq.id, plan: p.pendingPlan });
   save(); emit('project', p);
+}
+
+// Bağımlılık grafiğini çalıştırır: her görev kendi önkoşulları biter bitmez başlar (eşzamanlılığı gate sınırlar)
+async function runDag(p, list, done, runOne) {
+  let pending = [...list]; const live = new Map();
+  while ((pending.length || live.size) && !p.cancelled) {
+    let ready = pending.filter(t => (t.needs || []).every(n => done[n] || !list.some(x => x.id === n)));
+    if (!ready.length && !live.size) ready = [pending[0]];   // çözülemeyen bağımlılık: kilitlenmek yerine sıradakini çalıştır
+    for (const t of ready) { pending = pending.filter(x => x !== t); live.set(t.id, runOne(t).finally(() => live.delete(t.id))); }
+    if (live.size) await Promise.race(live.values());
+  }
+  await Promise.allSettled(live.values());
+}
+const reviewRounds = () => [0, 1, 2].includes(S.settings?.review) ? S.settings.review : 2;
+// akran incelemecisi: bu çıktının üzerine çalışacak (denetçi olmayan) ilk ekip arkadaşı; çıktıyı yalnızca denetçi kullanıyorsa son denetim yeter
+function reviewerFor(t, tasks) {
+  if (t.agent === 'auditor' || t.kind || t.role) return null;
+  const next = tasks.find(x => (x.needs || []).includes(t.id) && x.agent !== t.agent && x.agent !== 'auditor' && !x.kind);
+  if (next) return next.agent;
+  return !tasks.some(x => x.agent === 'auditor') && S.agents.auditor ? 'auditor' : null;
+}
+
+// ---------- Anlık görüntü ve geri alma ----------
+// Görev başlamadan önce çalışma klasörünün kopyası uygulamanın veri klasörüne alınır. Geri alınca o andaki hâline dönülür;
+// sonradan oluşan dosyalar SİLİNMEZ, anlık görüntünün "geri-alinanlar" klasörüne taşınır.
+function snapshot(p, tag) {
+  const dir = wsDir(p), files = walk(dir, 3000); let size = 0;
+  for (const f of files) { try { size += fs.statSync(f).size; } catch {} if (size > SNAP_MAX_BYTES) { logEv(p, 'ceo', 'task', 'Anlık görüntü alınmadı: çalışma klasörü 50 MB\'tan büyük'); return null; } }
+  const id = `${Date.now().toString(36)}-${String(tag).replace(/[^\w-]/g, '')}`, to = path.join(SNAPS, p.id, id);
+  try {
+    for (const f of files) { const r = path.relative(dir, f), d = path.join(to, 'files', r); fs.mkdirSync(path.dirname(d), { recursive: true }); fs.copyFileSync(f, d); }
+    fs.mkdirSync(to, { recursive: true }); fs.writeFileSync(path.join(to, 'meta.json'), JSON.stringify({ id, tag, ts: Date.now(), files: files.map(f => path.relative(dir, f).replace(/\\/g, '/')), size }));
+  } catch (e) { logEv(p, 'ceo', 'error', 'Anlık görüntü alınamadı: ' + e.message); return null; }
+  const all = fs.readdirSync(path.join(SNAPS, p.id)).sort();   // en eski görüntüler silinir (yalnızca uygulamanın kendi kopyaları)
+  for (const old of all.slice(0, Math.max(0, all.length - SNAP_KEEP))) fs.rmSync(path.join(SNAPS, p.id, old), { recursive: true, force: true });
+  return id;
+}
+function restoreSnapshot(p, id) {
+  if (!/^[\w-]+$/.test(id || '')) throw new Error('geçersiz anlık görüntü');
+  const from = path.join(SNAPS, p.id, id); let meta; try { meta = JSON.parse(fs.readFileSync(path.join(from, 'meta.json'), 'utf8')); } catch { throw new Error('Anlık görüntü bulunamadı (eskiler otomatik silinir)'); }
+  const before = snapshot(p, 'geri-almadan-once');   // geri almanın kendisi de geri alınabilsin
+  const dir = wsDir(p), keep = new Set(meta.files.map(x => x.toLowerCase())), moved = [], trash = path.join(from, 'geri-alinanlar', Date.now().toString(36));
+  for (const f of walk(dir, 3000)) { const r = path.relative(dir, f).replace(/\\/g, '/'); if (keep.has(r.toLowerCase())) continue; const d = path.join(trash, r); fs.mkdirSync(path.dirname(d), { recursive: true }); fs.renameSync(f, d); moved.push(r); }
+  for (const r of meta.files) { const d = path.join(dir, r); fs.mkdirSync(path.dirname(d), { recursive: true }); fs.copyFileSync(path.join(from, 'files', r), d); }
+  return { restored: meta.files.length, moved, trash: moved.length ? trash : null, ts: meta.ts, before };
+}
+
+// ---------- Otomatik doğrulama ----------
+// kesin kontroller (token yok) + giriş sayfası varsa gizli tarayıcıda masaüstü/mobil ekran görüntüsü ve konsol hataları
+function entryHtml(dir) {
+  const hs = walk(dir, 300).filter(f => /\.html?$/i.test(f)).sort((a, b) => a.split(/[\\/]/).length - b.split(/[\\/]/).length);
+  return hs.find(f => /^index\.html?$/i.test(path.basename(f))) || hs[0] || null;
+}
+function screenshots(p, tag) {
+  const html = entryHtml(wsDir(p));
+  if (!html || !ELECTRON || (FORCE_DEMO && !process.env.OFIS_SHOTS)) return Promise.resolve(null);
+  const out = path.join(SHOTS, p.id, tag); fs.rmSync(out, { recursive: true, force: true });
+  const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
+  return new Promise(resolve => execFile(ELECTRON, [SHOT_TOOL, html, out], { env, windowsHide: true, timeout: 60000 }, () => {
+    try { const r = JSON.parse(fs.readFileSync(path.join(out, 'sonuc.json'), 'utf8')); resolve(r.error ? null : { page: path.relative(wsDir(p), html).replace(/\\/g, '/'), shots: (r.shots || []).map(x => path.basename(x)), dir: out, errors: r.errors || [] }); } catch { resolve(null); }
+  }));
+}
+async function verifyProject(p, tag) {
+  const checks = checkWorkspace(wsDir(p)), visual = await screenshots(p, tag);
+  p.verify = { ts: Date.now(), tag, checks, visual };
+  logEv(p, 'auditor', 'task', `Otomatik doğrulama: ${checks.errors} hata, ${checks.warnings} uyarı${visual ? `, tarayıcıda ${visual.errors.length} sorun` : ''}`);
+  save(); emit('project', p); return p.verify;
+}
+const verifyText = v => !v ? '' : checksText(v.checks) + (v.visual ? `\nTARAYICI KONTROLÜ (${v.visual.page} gizli tarayıcıda açıldı): ${v.visual.errors.length ? v.visual.errors.map(e => '\n- ' + e).join('') : 'konsol hatası yok, yatay taşma yok.'}\nEKRAN GÖRÜNTÜLERİ (Read ile aç ve masaüstü/mobil görünümü değerlendir): ${v.visual.shots.map(x => path.join(v.visual.dir, x)).join(' , ')}` : '');
+// dosyanın sorumlusu: o dosyayı teslim eden görevin ajanı; yoksa dosya türüne göre
+function ownerOfFile(p, file) {
+  const ok = k => S.agents[k] && !['ceo', 'auditor'].includes(k) && !S.agents[k].external;
+  const b = path.basename(file).toLowerCase(), t = (p.board || []).find(x => !x.kind && ok(x.agent) && String(x.deliverable || '').toLowerCase().includes(b));
+  if (t) return t.agent;
+  const pref = /\.(png|jpe?g|gif|svg|webp)$/i.test(file) ? ['designer', 'developer'] : /\.md$/i.test(file) ? ['writer', 'designer', 'developer'] : ['developer', 'designer', 'writer'];
+  return pref.find(ok) || Object.keys(S.agents).find(ok) || null;
+}
+
+// ---------- Ekip toplantısı ----------
+// 1) her ajan ürünü BÜTÜN olarak değerlendirir (olmuş / olmamış / olabilir), 2) eleştiri alan ajan yanıt verir (katılıyorum / kısmen / katılmıyorum),
+// 3) CEO tartışmayı tartıp karar verir. Dönen: { ajan: ['yapılacak iş', ...] } — boşsa değişiklik yok
+const roleName = k => k === 'sistem' ? 'Otomatik kontrol' : S.agents[k]?.title || k;
+async function teamMeeting(p, done, round) {
+  const ok = k => S.agents[k] && !['ceo', 'auditor'].includes(k) && !S.agents[k].external;
+  const items = [];
+  for (const d of Object.values(done)) if (d.agent === 'auditor' && d.fixes && !d.fixesUsed) {   // denetçinin bulguları gündeme girer
+    d.fixesUsed = true;
+    for (const [k, list] of Object.entries(d.fixes)) for (const x of list) items.push({ from: 'auditor', sahip: k, tur: 'olmamis', text: x });
+  }
+  for (const d of Object.values(done)) if (d.accept && !d.acceptUsed) {   // kalan kabul ölçütü → ölçütü taşıyan görevin sahibine
+    d.acceptUsed = true;
+    for (const [id, v] of Object.entries(d.accept)) if (v.durum === 'kaldi') {
+      const c = (p.criteria || []).find(x => x.id === id), owner = (p.board || []).find(x => !x.kind && (x.criteria || []).includes(id) && ok(x.agent))?.agent;
+      if (c && owner && !items.some(x => x.text.includes(id + ' '))) items.push({ from: 'auditor', sahip: owner, tur: 'olmamis', text: `${id} karşılanmadı: ${c.olcut}${v.not ? ' — ' + v.not : ''}` });
+    }
+  }
+  const v = await verifyProject(p, `m${round}`);
+  for (const x of v.checks.issues.filter(x => x.sev === 'hata').slice(0, 8)) { const o = ownerOfFile(p, x.file); if (o) items.push({ from: 'sistem', sahip: o, tur: 'olmamis', text: `${x.file}: ${x.msg}` }); }
+  if (v.visual) for (const e of v.visual.errors.slice(0, 5)) { const o = ownerOfFile(p, v.visual.page); if (o) items.push({ from: 'sistem', sahip: o, tur: 'olmamis', text: `Tarayıcıda: ${e}` }); }
+  const work = Object.values(done).filter(d => !d.fix && d.agent !== 'auditor' && d.agent !== 'ceo');
+  const members = round === 1 ? [...new Set(work.map(d => d.agent))].filter(k => S.agents[k] && !S.agents[k].external) : [];
+  if (!members.length && !items.some(x => ok(x.sahip))) return {};
+  const bt = { id: `m${round}`, agent: 'ceo', kind: 'ekip toplantısı', needs: [], deliverable: '', status: 'çalışıyor', startedAt: Date.now(),
+    instruction: round === 1 ? 'Ekip ürünü bütün olarak değerlendiriyor: olmuş / olmamış / olabilir → itirazlar tartışılıyor → CEO karar veriyor' : 'Denetçinin yeni bulguları için CEO karar veriyor' };
+  (p.board ||= []).push(bt);
+  const phase = ph => { bt.phase = ph; save(); emit('project', p); };
+  const close = (status, summary) => { bt.status = status; bt.endedAt = Date.now(); bt.summary = summary; delete bt.phase; save(); emit('project', p); };
+  const files = listFiles(wsDir(p)).slice(0, 30);
+  const roster = Object.entries(S.agents).filter(([k, a]) => k !== 'ceo' && !a.external).map(([k, a]) => `${k}=${a.title}`).join(', ');
+  // 1) değerlendirme: herkes aynı anda, dosyaları okuyarak (salt okunur)
+  if (members.length) {
+    phase('değerlendirme'); logEv(p, 'ceo', 'task', 'Ekip toplantısı başladı');
+    post(p, 'ceo', 'all', 'Ekip toplantısı: ilk sürüm hazır. Herkes ürünü bütün olarak incelesin — neler olmuş, neler olmamış, neler daha iyi olabilir?', { meet: 1 });
+    const team = work.map(d => `[${d.agent}:${roleName(d.agent)}] ${cut(d.summary, 220)}`).join('\n');
+    await Promise.all(members.map(async k => {
+      const r = await ask(p, k, `EKIP_DEGERLENDIRME\nEkip projenin ilk sürümünü bitirdi. Şimdi ürünü BÜTÜN olarak değerlendiriyorsunuz; sadece kendi parçana değil, kullanıcının eline geçecek ürünün tamamına bak: amaca ve vizyona hizmet ediyor mu, parçalar (araştırma, içerik, tasarım, kod) birbiriyle tutarlı ve birbirini tamamlıyor mu, eksik kalan bir taraf var mı?\n` +
+        `PROJE TANIMI: ${cut(p.brief || '', 1000)}${visionText(p)}\nEKİBİN YAPTIKLARI:\n${team}\nÇALIŞMA KLASÖRÜNDEKİ DOSYALAR: ${files.join(', ') || '(yok)'}\nEKİP ANAHTARLARI: ${roster}\n` +
+        `Dosyaları OKU. ${roleName(k)} olarak kendi uzmanlığının gözüyle ama ürünün bütünü için yaz:\n- olmus: gerçekten iyi olan en fazla 2 şey\n- olmamis: kullanıcıya zarar veren hata, eksik ya da parçalar arası tutarsızlık; en fazla 3; her birinin sorumlusu ("sahip", ekip anahtarı) ve somut düzeltmesiyle\n- olabilir: ürünü belirgin şekilde iyileştirecek en fazla 2 öneri, sahibiyle\n` +
+        `Kendi işindeki sorunları da dürüstçe yaz. Zevk farkı, belirsiz öneri ve kapsam dışı büyük işler yazma.\nYanıtının EN SON satırı SADECE şu JSON olsun: {"olmus":["..."],"olmamis":[{"sahip":"<anahtar>","konu":"ne, nerede","oneri":"nasıl düzeltilir"}],"olabilir":[{"sahip":"<anahtar>","oneri":"..."}]}`,
+        { purpose: 'ekip değerlendirmesi', phase: 'plan', cat: categoryOf(k, 'inceleme denetim review', '') });
+      const c = !r.error && critiqueOf(r.response); if (!c) return;
+      const lines = [...c.olmus.map(x => '✓ Olmuş: ' + x), ...c.olmamis.map(x => `✗ Olmamış (${roleName(x.sahip)}): ${x.text}`), ...c.olabilir.map(x => `→ Olabilir (${roleName(x.sahip)}): ${x.text}`)];
+      if (lines.length) post(p, k, 'all', lines.join('\n'), { reqId: r.id, meet: 1 });
+      for (const x of c.olmamis) items.push({ from: k, sahip: x.sahip, tur: 'olmamis', text: x.text });
+      for (const x of c.olabilir) items.push({ from: k, sahip: x.sahip, tur: 'olabilir', text: x.text });
+    }));
+  }
+  if (p.cancelled) { close('iptal', 'Toplantı yarıda kesildi.'); return {}; }
+  const agenda = items.filter(x => ok(x.sahip)).slice(0, 16).map((x, i) => ({ ...x, no: i + 1 }));
+  if (!agenda.length) { close('bitti', 'Değiştirilecek bir şey bulunmadı; ekip ürünü onayladı.'); post(p, 'ceo', 'all', bt.summary, { meet: 1 }); return {}; }
+  // 2) tartışma: eleştiri alan ajan her maddeye katılıp katılmadığını gerekçesiyle söyler (kısa metin, araçsız)
+  const bySahip = {}; for (const x of agenda) if (x.from !== x.sahip) (bySahip[x.sahip] ||= []).push(x);
+  if (Object.keys(bySahip).length) {
+    phase('tartışma');
+    await Promise.all(Object.entries(bySahip).map(async ([k, list]) => {
+      const mine = work.filter(d => d.agent === k).map(d => cut(d.summary, 200)).join(' | ');
+      const r = await ask(p, k, `ELESTIRI_YANIT\nEkip toplantısındasın. Arkadaşların senin işin hakkında şunları söyledi:\n` + list.map(x => `${x.no}. [${roleName(x.from)}] ${x.tur === 'olmamis' ? 'olmamış' : 'olabilir'}: ${x.text}`).join('\n') +
+        `\nSENİN YAPTIĞIN: ${mine || '(özet yok)'}${visionText(p)}\nHer madde için karar ver: "katiliyorum" (yapacağım), "kismen" (neyi nasıl yapacağını söyle) ya da "katilmiyorum" (somut gerekçeyle: kullanıcının isteğine ters, kapsam dışı, zaten var vb.). Savunmacı olma; ürün için en iyisini düşün.\n` +
+        `Yanıtın SADECE JSON olsun: {"yanitlar":[{"no":<madde no>,"karar":"katiliyorum|kismen|katilmiyorum","not":"en fazla 20 kelime"}]}`,
+        { purpose: 'toplantıda yanıt', phase: 'text' });
+      const ys = repliesOf(r.response).filter(y => list.some(x => x.no === y.no)); if (!ys.length) return;
+      for (const y of ys) list.find(x => x.no === y.no).yanit = y;
+      const ic = { katiliyorum: '✓ Katılıyorum', kismen: '◐ Kısmen', katilmiyorum: '✗ Katılmıyorum' };
+      post(p, k, 'all', 'Bana gelen önerilere yanıtım:\n' + ys.map(y => `${y.no}. ${ic[y.karar]}${y.not ? ' — ' + y.not : ''}`).join('\n'), { reqId: r.id, meet: 1 });
+    }));
+  }
+  if (p.cancelled) { close('iptal', 'Toplantı yarıda kesildi.'); return {}; }
+  // 3) CEO kararı
+  phase('karar');
+  const r = await ask(p, 'ceo', `TOPLANTI_KARAR\nPROJE: ${cut(p.brief || '', 800)}${visionText(p)}\nEkip ürünü değerlendirdi. Gündem (madde no. [öneren → sorumlu] tür: öneri | sorumlunun yanıtı):\n` +
+    agenda.map(x => `${x.no}. [${x.from} → ${x.sahip}] ${x.tur === 'olmamis' ? 'olmamış' : 'olabilir'}: ${x.text}${x.yanit ? ` | yanıt: ${x.yanit.karar}${x.yanit.not ? ' — ' + x.yanit.not : ''}` : ''}`).join('\n') +
+    `\nÜrünün bütünü ve kullanıcının amacı için hangi değişikliklerin yapılacağına karar ver. Hataları ve vizyona hizmet eden önerileri kabul et; gerekçesi ikna edici itirazları, zevk meselelerini ve kapsam dışı işleri reddet; tekrar edenleri birleştir. Her kararın tek bir sorumlusu olsun (ekip anahtarı), iş somut ve uygulanabilir yazılsın; ajan başına en fazla 4 karar.\n` +
+    `Yanıtın SADECE JSON olsun: {"ozet":"ekibe 2-3 cümle: neye karar verildi ve neden","kararlar":[{"sahip":"<anahtar>","is":"ne, nerede, nasıl"}],"reddedilen":[{"no":<madde no>,"neden":"kısa"}]}`,
+    { purpose: 'toplantı kararı', phase: 'text' });
+  let dec = !r.error && decisionsOf(r.response);
+  if (!dec) dec = { ozet: 'Karar metni okunamadı; itiraz edilmeyen maddeler uygulanacak.', kararlar: agenda.filter(x => x.yanit?.karar !== 'katilmiyorum').map(x => ({ sahip: x.sahip, is: x.text })), reddedilen: [] };
+  const out = {}; for (const d of dec.kararlar) if (ok(d.sahip) && (out[d.sahip] ||= []).length < 4) out[d.sahip].push(d.is);
+  for (const k of Object.keys(out)) if (!out[k].length) delete out[k];
+  const n = Object.values(out).reduce((a, l) => a + l.length, 0);
+  post(p, 'ceo', 'all', (dec.ozet ? dec.ozet + '\n\n' : '') + (n ? 'Kararlar:\n' + Object.entries(out).map(([k, l]) => l.map(x => `• ${S.agents[k].name} (${roleName(k)}): ${x}`).join('\n')).join('\n') : 'Değişiklik kararı çıkmadı.') +
+    (dec.reddedilen.length ? '\n\nReddedilenler:\n' + dec.reddedilen.map(x => `• ${x.no ? x.no + '. madde' : 'Madde'}: ${x.neden}`).join('\n') : ''), { reqId: r.id, meet: 1 });
+  bt.meeting = { items: agenda.length, decisions: n, rejected: dec.reddedilen.length };
+  close('bitti', `${agenda.length} madde konuşuldu, ${n} karar alındı${dec.reddedilen.length ? `, ${dec.reddedilen.length} öneri reddedildi` : ''}.`);
+  logEv(p, 'ceo', 'task', 'Ekip toplantısı bitti: ' + bt.summary);
+  return out;
+}
+
+// ---------- Ürün modu: tek yapımcı ↔ gözden geçirenler ----------
+// Girdiler yapımcıya ÖZET değil TAM belge olarak gider (MetaGPT); yapımcı örtük kararlarını açıkça yazar (Cognition).
+function inputDocs(p, deps) {
+  const dir = wsDir(p); let total = 0; const out = [];
+  for (const d of deps) {
+    const bt = (p.board || []).find(x => x.id === d.id), files = String(bt?.deliverable || '').split(/[,;]|\s+ve\s+/).map(x => x.trim()).filter(x => /\.(md|txt)$/i.test(x));
+    let txt = '';
+    for (const fl of files) { const fp = path.resolve(dir, fl); if (fp.toLowerCase().startsWith(dir.toLowerCase()) && fs.existsSync(fp)) txt += `=== ${fl} (${roleName(d.agent)}) ===\n${cut(fs.readFileSync(fp, 'utf8'), 6000)}\n`; }
+    if (!txt) txt = `=== ${roleName(d.agent)} raporu ===\n${cut(d.body || d.summary || '', 3000)}\n`;
+    if (total + txt.length > 16000) txt = cut(txt, Math.max(0, 16000 - total)); total += txt.length; if (txt) out.push(txt);
+  }
+  return out.join('\n');
+}
+// ikinci görüş CLI'leri için ürünün metin dosyaları (istem içinde; toplam en fazla 30 bin karakter)
+function productFilesText(p) {
+  const dir = wsDir(p); let total = 0, out = '';
+  for (const f of walk(dir, 200).filter(x => /\.(html?|css|m?js|json|svg)$/i.test(x))) { if (total > 30000) break; let t; try { t = fs.readFileSync(f, 'utf8'); } catch { continue; } const r = `=== ${path.relative(dir, f).replace(/\\/g, '/')} ===\n${cut(t, 30000 - total)}\n`; out += r; total += r.length; }
+  return out;
+}
+function builderPrompt(p, t, deps) {
+  const ins = inputDocs(p, deps), dsk = S.agents.designer ? skillsPrompt(pickSkills('designer', S.agents.designer, `${t.instruction} ${p.brief || ''}`, 2)) : '';
+  return `\nYAPIMCI_GOREVI: Bu ürünün TEK yazarı sensin; tasarımı da kodla birlikte sen yapıyorsun — usta bir ürün tasarımcısı-geliştirici gibi çalış. Başka kimse ürün dosyalarına yazmayacak; ekip girdi hazırladı ve sonra ekran görüntülerine bakarak gözden geçirecek.` +
+    `\n- Önce girdileri ve vizyondaki tarz/yapıyı oku. Görsel yönü (renk paleti, tipografi ölçeği, boşluk, köşe, gölge) CSS değişkenleriyle kur ve ürünün tamamına tutarlı uygula; sıradan şablon görünümünden kaçın, net bir görsel hiyerarşi kur.` +
+    `\n- Girdilerdeki gerçek içeriği kullan; yer tutucu bırakma. Mobilde ve masaüstünde düzgün görünsün; etkileşimler çalışsın.` +
+    `\n- Bitirmeden önce dosyalarını yeniden aç ve kabul ölçütlerini tek tek kontrol et.` +
+    `\n- Yanıtının sonunda (---ÖZ--- satırından önce) "---KARARLAR---" başlığı altında verdiğin örtük kararları madde madde yaz: palet, yazı tipleri, yerleşim, dosya yapısı, önemli etkileşimler. Ekip bunlara göre değerlendirecek.` +
+    (ins ? `\nGİRDİLER (ekibin hazırladığı belgeler, tam metin — özet değil):\n${ins}` : '') + (dsk ? '\n(Tasarım becerileri de senin)' + dsk : '');
+}
+// gözden geçirme döngüsü: gözden geçirenler (temiz bağlam, yazmaz) → yapımcı süzer ve uygular (tek yazar) → tekrar; ciddi bulgu kalmayınca biter
+async function buildLoop(p, done, rounds, runOne) {
+  const bt0 = (p.board || []).find(x => x.role === 'yapimci' && !x.kind); if (!bt0) return;
+  const builder = bt0.agent, revs = reviewersFor(p.board || [], S.agents, k => provUsable(k), builder);
+  const rejected = [], stats = p.loop = { tur: 0, bulgu: 0, uygulandi: 0, reddedildi: 0 };
+  for (let round = 1; round <= rounds + 1 && !p.cancelled; round++) {
+    const v = await verifyProject(p, `g${round}`), files = listFiles(wsDir(p)).slice(0, 40), inline = productFilesText(p);
+    const rb = { id: `g${round}`, agent: revs[0]?.agent || 'auditor', kind: 'gözden geçirme', needs: [], deliverable: '', status: 'çalışıyor', startedAt: Date.now(), instruction: `Gözden geçirme (tur ${round}): ${revs.map(r => r.label).join(', ') || 'otomatik kontroller'}` };
+    p.board.push(rb); save(); emit('project', p);
+    const findings = [], failed = [];
+    if (revs.length) post(p, 'ceo', 'all', `Gözden geçirme turu ${round}: ${revs.map(r => r.label).join(', ')} ürüne bakıyor.`, { meet: 1 });
+    await Promise.all(revs.map(async R => {
+      const crit = (p.criteria || []).length ? `\nKABUL ÖLÇÜTLERİ:\n${p.criteria.map(c => `- ${c.id}: ${c.olcut}`).join('\n')}` : '';
+      const prov = R.provider || (provUsable('claude') ? 'claude' : undefined);   // ana gözden geçirenler Claude Code'da: dosyaları ve ekran görüntülerini okuyabilir
+      const r = await ask(p, R.agent, `GOZDEN_GECIRME (tur ${round})\nBu ürünün ${R.label} sorumlususun. Ürünü TEK bir yapımcı (${S.agents[builder].name}, ${roleName(builder)}) yazdı; sen dosya YAZMAZSIN, yalnızca bakar ve somut geri bildirim verirsin. Odak: ${R.focus}.\n` +
+        `PROJE TANIMI: ${cut(p.brief || '', 1000)}${visionText(p)}${crit}` +
+        ((p.decisions || []).length ? `\nYAPIMCININ KARARLARI (bilinçli seçimler; ancak kullanıcıya zarar veriyorsa itiraz et):\n${p.decisions.map(x => '- ' + x).join('\n')}` : '') +
+        `\nÜRÜN DOSYALARI: ${files.join(', ') || '(yok)'}${verifyText(v)}` + (prov && prov !== 'claude' && inline ? `\nDOSYA İÇERİKLERİ (ortamında dosya okuma engellenebilir; inceleme için buradakiler yeterli, okumayı deneme):\n${inline}` : '') +
+        (rejected.length ? `\nYAPIMCININ GEREKÇESİYLE REDDETTİKLERİ (ikna edici değilse tekrar et, değilse önerme):\n${rejected.slice(-8).map(x => `- ${x.text} → ${x.not}`).join('\n')}` : '') +
+        `\nDosyaları OKU${R.agent === 'designer' && v.visual ? ' ve ekran görüntülerini Read ile aç' : ''}. Kullanıcı bu ürünü gerçekten beğensin diye en önemli sorunları bul. En fazla 6 bulgu; zevk farkı ve belirsiz öneri yazma. Önem: kritik = kullanıcıyı engelliyor ya da açıkça kötü görünüyor; orta = belirgin kalite sorunu; kucuk = cila.\n` +
+        `Yanıtının EN SON satırı SADECE şu JSON olsun: {"olmus":["en fazla 3 güçlü yan"],"bulgular":[{"onem":"kritik|orta|kucuk","konu":"ne, nerede (dosya/bölüm)","oneri":"nasıl düzeltilir, somut"}]${R.audit ? ',"kabul":{"K1":"gecti — kanıt"},"puan":{"dogruluk":n,"tamlik":n,"talimat":n,"not":"somut kanıt"}' : ''}}`,
+        { purpose: R.label, phase: 'plan', provider: prov, cat: categoryOf(R.agent, 'inceleme denetim review', '') });
+      if (r.error) { failed.push(r.error); return; }
+      const fd = findingsOf(r.response); if (!fd) return;
+      if (R.audit) {
+        const acc = acceptOf(fd.raw, p.criteria || []); for (const [k, x] of Object.entries(acc)) (p.acceptance ||= {})[k] = { ...x, ts: Date.now() };
+        for (const [id, x] of Object.entries(acc)) if (x.durum === 'kaldi') { const c = p.criteria.find(y => y.id === id); fd.bulgular.push({ onem: 'kritik', text: `${id} karşılanmadı: ${c?.olcut || ''}${x.not ? ' — ' + x.not : ''}` }); }
+        if (fd.raw.puan && typeof fd.raw.puan === 'object') (p.quality ||= {})[builder] = fd.raw.puan;
+      }
+      const ic = { kritik: '✗ Kritik', orta: '! Orta', kucuk: '· Küçük' };
+      const lines = [...fd.olmus.map(x => '✓ ' + x), ...fd.bulgular.map(x => `${ic[x.onem]}: ${x.text}`)];
+      post(p, R.agent, 'all', `${R.label}${R.provider ? '' : ''}:\n` + (lines.join('\n') || 'Sorun görmedim.'), { reqId: r.id, meet: 1 });
+      for (const x of fd.bulgular) findings.push({ ...x, from: R.label });
+    }));
+    if (revs.length && failed.length === revs.length) { rb.status = 'hata'; rb.endedAt = Date.now(); rb.summary = 'Gözden geçirenler çalışamadı: ' + cut(failed[0], 120); post(p, 'ceo', 'user', `Gözden geçirme durdu: ${cut(failed[0], 160)}. Limit dolduysa sıfırlanınca "Devam et" ile sürdürebilirsin.`); save(); emit('project', p); break; }
+    for (const x of v.checks.issues.filter(x => x.sev === 'hata').slice(0, 8)) findings.push({ onem: 'kritik', text: `${x.file}: ${x.msg}`, from: 'Otomatik kontrol' });
+    if (v.visual) for (const e of v.visual.errors.slice(0, 5)) findings.push({ onem: 'kritik', text: 'Tarayıcıda: ' + e, from: 'Otomatik kontrol' });
+    const serious = findings.filter(x => x.onem !== 'kucuk');
+    rb.status = 'bitti'; rb.endedAt = Date.now(); rb.summary = `${findings.length} bulgu (${serious.length} ciddi)`; stats.tur = round; stats.bulgu += findings.length; save(); emit('project', p);
+    if (!serious.length) { post(p, 'ceo', 'all', `Tur ${round}: ciddi bulgu kalmadı${findings.length ? ` (${findings.length} küçük cila önerisi)` : ''}; ürün gözden geçirmeden geçti.`, { meet: 1 }); break; }
+    if (round > rounds || p.cancelled) break;   // son tur yalnızca kontrol içindir
+    // yapımcı geri bildirimi süzer (uygula/reddet) ve kabul ettiklerini TEK elden uygular
+    const items = [...serious, ...findings.filter(x => x.onem === 'kucuk')].slice(0, 14).map((x, i) => ({ ...x, no: i + 1 }));
+    const ft = { id: `d${round}`, agent: builder, kind: 'düzeltme', role: 'yapimci', needs: [], provider: bt0.provider && provUsable(bt0.provider) ? bt0.provider : undefined, caps: bt0.caps || [], criteria: bt0.criteria || [], deliverable: bt0.deliverable,
+      instruction: `GERI_BILDIRIM_TRIYAJ (tur ${round}): Gözden geçirenler ürünün hakkında şunları söyledi. Her maddeye kullanıcının isteği, vizyon ve kendi kararların açısından bak: kullanıcıya fayda sağlıyorsa UYGULA; isteğe ters, kapsam dışı ya da yanlışsa gerekçesiyle REDDET — körü körüne her şeyi uygulama.\n` +
+        items.map(x => `${x.no}. [${x.onem}] (${x.from}) ${x.text}`).join('\n') +
+        `\nKabul ettiklerini dosyalarında düzelt (yalnızca ilgili yerleri). Yanıtının sonunda (---ÖZ--- satırından önce) "---TRİYAJ---" başlığı altında her madde için tek satır yaz: "1: uygulandı — ne yaptın" ya da "2: reddedildi — gerekçe". Kararların değiştiyse "---KARARLAR---" altında güncel listeyi yaz.` };
+    p.board.push({ id: ft.id, agent: ft.agent, kind: ft.kind, role: ft.role, caps: ft.caps, criteria: ft.criteria, instruction: `Geri bildirimi süz ve uygula (tur ${round}): ${items.length} madde`, deliverable: ft.deliverable, needs: [], status: 'bekliyor' });
+    save(); emit('project', p);
+    await runOne(ft);
+    if (done[ft.id]?.metrics?.error) { post(p, 'ceo', 'user', `Yapımcının düzeltme turu hatayla bitti (${cut(String(done[ft.id].summary || ''), 160)}); gözden geçirme döngüsü durduruldu. Limit dolduysa sıfırlanınca "Devam et" ile sürdürebilirsin.`); break; }
+    const tr = done[ft.id]?.triage || [];
+    if (tr.length) {
+      const ic = { uygulandi: '✓ Uygulandı', kismen: '◐ Kısmen', reddedildi: '✗ Reddedildi' };
+      post(p, builder, 'all', 'Geri bildirime yanıtım:\n' + tr.map(y => `${y.no}. ${ic[y.karar]}${y.not ? ' — ' + y.not : ''}`).join('\n'), { meet: 1 });
+      for (const y of tr) { const it = items.find(x => x.no === y.no); if (!it) continue; if (y.karar === 'reddedildi') { rejected.push({ text: it.text, not: y.not }); stats.reddedildi++; } else stats.uygulandi++; }
+    }
+    save(); emit('project', p);
+  }
 }
 
 // 2) Kullanıcı planı onaylayınca ajanlar işe koyulur
 async function executePlan(p, { resume = false } = {}) {
   let tasks, done = {};
   if (resume) {
-    const bd = p.board || []; if (!bd.length) return;
+    const bd = p.board = (p.board || []).filter(x => !(['ekip toplantısı', 'gözden geçirme'].includes(x.kind) && x.status !== 'bitti'));   // yarım kalan toplantı yeniden yapılır
+    if (!bd.length) return;
     for (const x of bd) if (x.status === 'bitti') done[x.id] = { agent: x.agent, summary: x.summary || '', body: '', metrics: x.metrics };
     for (const x of bd) if (x.status !== 'bitti') { x.status = 'bekliyor'; delete x.startedAt; delete x.endedAt; }
-    tasks = bd.filter(x => x.status !== 'bitti').map(x => ({ id: x.id, agent: x.agent, instruction: x.instruction, needs: x.needs, deliverable: x.deliverable }));
+    tasks = bd.filter(x => x.status !== 'bitti').map(x => ({ id: x.id, agent: x.agent, instruction: x.instruction, needs: x.needs, deliverable: x.deliverable, kind: x.kind, caps: x.caps, criteria: x.criteria, role: x.role }));
     p.interrupted = false; p.cancelled = false;
   } else {
-    const plan = p.pendingPlan; if (!plan) return; p.pendingPlan = null; tasks = plan.tasks;
-    p.board = tasks.map(t => ({ id: t.id, agent: t.agent, instruction: t.instruction, deliverable: t.deliverable || '', needs: t.needs || [], status: 'bekliyor' }));
+    const plan = p.pendingPlan; if (!plan) return; p.pendingPlan = null; tasks = plan.tasks; if (plan.vision) p.vision = plan.vision; p.criteria = plan.criteria || []; p.acceptance = {};
+    for (const t of tasks) t.caps ||= capsForTask(t, t.agent, p.brief);
+    if (!plan.mode) { const o = productize(tasks, S.agents); tasks = o.tasks; plan.mode = o.mode; }
+    p.mode = plan.mode; p.decisions = []; p.loop = null;
+    p.board = tasks.map(t => ({ id: t.id, agent: t.agent, instruction: t.instruction, deliverable: t.deliverable || '', needs: t.needs || [], caps: t.caps, criteria: t.criteria || [], role: t.role, status: 'bekliyor' }));
     p.runId = uid(); p.runStart = Date.now();
   }
   p.executing = true; save(); emit('project', p);
-  const brief = p.brief; let pending = [...tasks];
+  const brief = p.brief, rounds = reviewRounds();
+  if (rounds && p.mode !== 'urun') for (const t of tasks) t.reviewer = reviewerFor(t, tasks);   // ürün modunda gözden geçirme döngüsü yapar
+  const runOne = async t => {
+    const deps = (t.needs || []).map(n => done[n]).filter(Boolean);
+    post(p, 'ceo', t.agent, t.instruction);
+    for (const d of deps) post(p, d.agent, t.agent, `Çıktımın özeti: ${d.summary}`, { handoff: true });
+    await runTask(p, t, brief, deps, done);
+  };
   try {
-    while (pending.length && !p.cancelled) {
-      let ready = pending.filter(t => (t.needs || []).every(n => done[n] || !tasks.find(x => x.id === n)));
-      if (!ready.length) ready = [pending[0]];
-      pending = pending.filter(t => !ready.includes(t));
-      await Promise.all(ready.map(async t => {
-        const deps = (t.needs || []).map(n => done[n]).filter(Boolean);
-        post(p, 'ceo', t.agent, t.instruction);
-        for (const d of deps) post(p, d.agent, t.agent, `Çıktımın özeti: ${d.summary}`, { handoff: true });
-        await runTask(p, t, brief, deps, done);
-      }));
+    await runDag(p, tasks, done, runOne);
+    if (p.mode === 'urun' && rounds) await buildLoop(p, done, rounds, runOne);
+    // ekip modu (içerik/araştırma): ekip toplantısı (olmuş/olmamış/olabilir → tartışma → CEO kararı) → kararlar paralel uygulanır → denetçi yeniden bakar
+    else for (let round = 1; round <= rounds && !p.cancelled; round++) {
+      const fixes = await teamMeeting(p, done, round);
+      const ks = Object.keys(fixes); if (!ks.length || p.cancelled) break;
+      const capsOf = k => [...new Set((p.board || []).filter(x => x.agent === k && !x.kind).flatMap(x => x.caps || []))];
+      const tag = `r${round}`, ft = ks.map((k, i) => ({ id: `${tag}-${i + 1}`, agent: k, kind: 'düzeltme', needs: [], caps: capsOf(k),
+        instruction: `Ekip toplantısı kararlarını uygula (tur ${round}):\n` + fixes[k].slice(0, 6).map(x => '- ' + x).join('\n'),
+        deliverable: [...new Set((p.board || []).filter(x => x.agent === k && !x.kind && x.deliverable).map(x => x.deliverable))].join(', ') }));
+      const re = S.agents.auditor ? [{ id: `${tag}-a`, agent: 'auditor', kind: 'yeniden denetim', needs: ft.map(x => x.id), deliverable: '',
+        instruction: `YENİDEN DENETİM (tur ${round}): kararlaştırılan değişiklikler yapıldı mı, yeni bir sorun çıktı mı kontrol et. Kararlar:\n` + ks.map(k => `${k}: ${fixes[k].slice(0, 6).join(' | ')}`).join('\n') }] : [];
+      const extra = [...ft, ...re];
+      p.board.push(...extra.map(t => ({ id: t.id, agent: t.agent, kind: t.kind, caps: t.caps, instruction: t.instruction, deliverable: t.deliverable, needs: t.needs, status: 'bekliyor' })));
+      tasks.push(...extra); save(); emit('project', p);
+      await runDag(p, extra, done, runOne);
     }
     if (Object.keys(done).length && !p.cancelled) {
       // token harcamadan rapor: ajan özetleri + çıktı dosyaları
       scoreProject(p, done);
-      const ds = Object.values(done);
-      p.summary = cut(((p.summary || '') + ' ' + ds.map(d => d.summary).join(' ')).trim(), 900);
+      const fin = await verifyProject(p, 'son');
+      const ds = Object.values(done), main = ds.filter(d => !d.fix);
+      const revs = (p.board || []).filter(x => x.review), applied = revs.filter(x => x.review.applied).length;
+      const meets = (p.board || []).filter(x => x.meeting), decN = meets.reduce((a, x) => a + x.meeting.decisions, 0), rejN = meets.reduce((a, x) => a + x.meeting.rejected, 0);
+      p.summary = cut(((p.summary || '') + ' ' + main.map(d => d.summary).join(' ')).trim(), 900);
       p.participants = [...new Set([...(p.participants || []), ...ds.map(d => d.agent)])];
-      const files = listFiles(wsDir(p));
-      post(p, 'ceo', 'user', `${ds.length} görev tamamlandı.\n` + ds.map(d => `• ${S.agents[d.agent].name}: ${cut(d.summary, 160)}`).join('\n') + (files.length ? `\n\nÇıktı dosyaları (${files.length}):\n` + files.slice(0, 20).map(x => '• ' + x).join('\n') : ''));
+      const files = listFiles(wsDir(p)), cr = p.criteria || [], acc = p.acceptance || {}, passN = cr.filter(c => acc[c.id]?.durum === 'gecti').length;
+      const accText = cr.length ? `\n\nKabul ölçütleri: ${passN}/${cr.length} karşılandı` + (cr.some(c => acc[c.id]?.durum !== 'gecti') ? '\n' + cr.filter(c => acc[c.id]?.durum !== 'gecti').map(c => `• ${c.id} ${acc[c.id] ? 'karşılanmadı' : 'denetlenmedi'}: ${c.olcut}${acc[c.id]?.not ? ' — ' + acc[c.id].not : ''}`).join('\n') : '') : '';
+      post(p, 'ceo', 'user', `${main.length} görev tamamlandı.\n` + main.map(d => `• ${S.agents[d.agent].name}: ${cut(d.summary, 160)}`).join('\n') +
+        (p.loop ? `\n\nYapımcı ↔ gözden geçirme: ${p.loop.tur} tur, ${p.loop.bulgu} bulgu, ${p.loop.uygulandi} uygulandı, ${p.loop.reddedildi} gerekçeyle reddedildi.` : '') +
+        (revs.length || meets.length ? `\n\nEkip içi kalite: ${revs.length} akran incelemesi (${applied} tanesinde öneriler uygulandı)${meets.length ? `, ${meets.length} ekip toplantısı (${decN} karar uygulandı${rejN ? `, ${rejN} öneri reddedildi` : ''})` : ''}.` : '') +
+        accText + `\n\nOtomatik doğrulama: ${fin.checks.errors} hata, ${fin.checks.warnings} uyarı${fin.visual ? `, tarayıcıda ${fin.visual.errors.length} sorun` : ''}.` + (files.length ? `\n\nÇıktı dosyaları (${files.length}):\n` + files.slice(0, 20).map(x => '• ' + x).join('\n') : ''));
     }
     p.tasksLog = [...(p.tasksLog || []), ...tasks.map(t => ({ agent: t.agent, instruction: t.instruction }))].slice(-30);
   } finally {
@@ -728,6 +1120,8 @@ async function setDirective(agentId, patch) {
   if (patch.think != null) a.think = !!patch.think;
   if (AGENT_PROVIDERS.includes(patch.provider)) a.provider = patch.provider;
   if (patch.turns != null) a.turns = Math.max(1, Math.min(60, +patch.turns || a.turns));
+  if (Array.isArray(patch.customSkills)) a.customSkills = patch.customSkills.map(cleanCustomSkill).filter(Boolean).slice(0, 12);
+  if (Array.isArray(patch.skillsOff)) { const ids = new Set(skillsOf(agentId, a).map(x => x.id)); a.skillsOff = patch.skillsOff.filter(x => ids.has(x)); }
   if (Array.isArray(patch.lessons)) a.lessons = patch.lessons.filter(l => l && typeof l.t === 'string').map(l => ({ t: String(l.t).slice(0, 180), src: String(l.src || 'kullanici'), w: +l.w || 1, n: +l.n || 1, ts: +l.ts || Date.now() })).slice(0, 24);
   save(); emit('state', publicState());
   if (changed) {
@@ -747,7 +1141,7 @@ function addAgent(b) {
   let key = (slug(title).replace(/-/g, '') || 'ajan'); if (['user', 'all', 'kullanici'].includes(key)) key += 'x';
   let k = key, i = 2; while (S.agents[k]) k = key + i++;
   S.agents[k] = { name, title, color: PALETTE[(Object.keys(S.agents).length - 1) % PALETTE.length], model: ['opus', 'sonnet', 'haiku'].includes(b.model) ? b.model : 'haiku', turns: 10, think: false,
-    provider: AGENT_PROVIDERS.includes(b.provider) ? b.provider : 'auto', tools: PRESETS[b.preset] || String(b.tools || READ), directive: String(b.directive || '').slice(0, 800) || 'Kısa ve net çalış. Çıktıları çalışma klasörüne yaz.', lessons: [], scores: [] };
+    provider: AGENT_PROVIDERS.includes(b.provider) ? b.provider : 'auto', tools: PRESETS[b.preset] || String(b.tools || READ), preset: PRESETS[b.preset] ? b.preset : undefined, directive: String(b.directive || '').slice(0, 800) || 'Kısa ve net çalış. Çıktıları çalışma klasörüne yaz.', lessons: [], scores: [] };
   save(); emit('state', publicState()); return k;
 }
 function removeAgent(id) {
@@ -774,7 +1168,7 @@ function savingsState() {
   return { month: savingsOf(all.filter(t => (t.endedAt || 0) >= m0), o), all: savingsOf(all, o), minAccept: MIN_ACCEPT, since: m0 };
 }
 const reqMeta = ({ system, prompt, response, ...m }) => m;   // ağır metinler arayüze gönderilmez
-const publicState = () => ({ agents: Object.fromEntries(Object.entries(S.agents).map(([k, a]) => [k, { ...a, level: levelOf(a), focus: focusOf(a), charter: charterFor(k, S.settings.lang), baseline: baselineOf(k, S.settings.baseMin || {}) }])), user: USER, projects: S.projects.map(({ procs, ...x }) => ({ ...x, own: !!x.dir && path.dirname(path.resolve(x.dir)).toLowerCase() === path.resolve(WORK).toLowerCase() })), requests: S.requests.map(reqMeta), parallel: parallel(), approvals: [...approvals.values()].map(strip),
+const publicState = () => ({ capabilities: CAPABILITIES.map(({ id, name, desc, roles }) => ({ id, name, desc, roles })), agents: Object.fromEntries(Object.entries(S.agents).map(([k, a]) => [k, { ...a, level: levelOf(a), focus: focusOf(a), charter: charterFor(k, S.settings.lang), baseline: baselineOf(k, S.settings.baseMin || {}), skillList: skillsOf(k, a).map(({ id, name, desc, when, steps, done, on, own, always }) => ({ id, name, desc, when: Array.isArray(when) ? when.join(', ') : when, steps, done, on, own, always: !!always })) }])), user: USER, projects: S.projects.map(({ procs, ...x }) => ({ ...x, own: !!x.dir && path.dirname(path.resolve(x.dir)).toLowerCase() === path.resolve(WORK).toLowerCase() })), requests: S.requests.map(reqMeta), parallel: parallel(), approvals: [...approvals.values()].map(strip),
   live: SHOWCASE ? { claude: true, info: 'bağlı', demo: false, off: false, available: true } : { claude: liveMode() && !cliOff(), info: claudeInfo.text, demo: !liveMode(), off: cliOff(), available: !!CLAUDE && !FORCE_DEMO },
   providers: PROVIDER_KEYS.map(k => ({ key: k, label: PROVIDERS[k].label, installed: SHOWCASE || (k === 'claude' ? !!CLAUDE : !!BINS[k]), ok: SHOWCASE || (k === 'claude' ? liveMode() : !!provInfo[k].ok), text: SHOWCASE ? 'bağlı' : k === 'claude' ? claudeInfo.text : provInfo[k].text, usable: provUsable(k), login: logins[k] ? { url: logins[k].url, text: logins[k].text, ts: logins[k].ts } : null, src: PRIOR_SRC[k], ...(k === 'claude' ? { on: true } : S.settings.providers[k]) })),
   routing: Object.fromEntries(Object.keys(CATEGORIES).map(c => [c, { label: CATEGORIES[c], est: Object.fromEntries(PROVIDER_KEYS.map(k => [k, estimate(S.routing, k, c)])) }])),
@@ -789,7 +1183,7 @@ http.createServer(async (req, res) => {
   try {
     // yerel güvenlik: sadece localhost Host/Origin kabul (başka sitelerden veya ağdan gelen istekleri reddet — DNS rebinding/CSRF)
     const okHost = /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(req.headers.host || '');
-    const okOrigin = !req.headers.origin || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(req.headers.origin);
+    const okOrigin = !req.headers.origin || new RegExp(`^http://(localhost|127\\.0\\.0\\.1):${PORT}$`).test(req.headers.origin);
     if (!okHost || !okOrigin) { res.writeHead(403); return res.end('yasak'); }
     if (url.pathname === '/events') {
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
@@ -828,7 +1222,18 @@ http.createServer(async (req, res) => {
         if (parts[3] === 'folder') { if (p.executing) return json(res, { error: 'Ajanlar çalışırken klasör değiştirilemez' }, 400); try { p.dir = validateDir(b.dir); } catch (e) { return json(res, { error: e.message }, 400); } save(); emit('project', p); return json(res, { ok: true, dir: p.dir }); }
         if (parts[3] === 'notes') { p.notes = String(b.notes || '').slice(0, 1500); save(); emit('project', p); return json(res, { ok: true }); }
         if (parts[3] === 'resume') { json(res, { ok: true }); executePlan(p, { resume: true }).catch(e => fail(p, e)); return; }
-        if (parts[3] === 'rerun') { const r = (p.runs || []).find(x => x.id === b.run); if (!r) return json(res, { error: 'çalıştırma bulunamadı' }, 404); p.pendingPlan = { id: uid(), tasks: r.tasks.map(({ id, agent, instruction, deliverable, needs }) => ({ id, agent, instruction, deliverable, needs })), research: [], needs: [], reply: 'Önceki çalıştırmanın planı yeniden yüklendi. Onaylarsan aynı görevler tekrar çalışır.', questions: [] }; post(p, 'ceo', 'user', p.pendingPlan.reply, { plan: p.pendingPlan }); save(); emit('project', p); return json(res, { ok: true }); }
+        if (parts[3] === 'revert') {
+          if (p.executing) return json(res, { error: 'Ajanlar çalışırken geri alınamaz' }, 400);
+          const bt = (p.board || []).find(x => x.snap === b.snap); if (!bt) return json(res, { error: 'adım bulunamadı' }, 404);
+          let r; try { r = restoreSnapshot(p, b.snap); } catch (e) { return json(res, { error: e.message }, 400); }
+          const from = bt.startedAt || r.ts;   // bu adım ve sonrası: asıl görevler sıraya döner, toplantı/düzeltme adımları kalkar
+          p.board = (p.board || []).filter(x => !(x.kind && (x.startedAt || 0) >= from));
+          for (const x of p.board) if (x === bt || (x.startedAt || 0) >= from) { x.status = 'bekliyor'; for (const k of ['startedAt', 'endedAt', 'summary', 'metrics', 'review', 'score', 'snap', 'skills']) delete x[k]; }
+          p.acceptance = {};
+          post(p, 'ceo', 'user', `Çalışma klasörü "${cut(bt.instruction, 60)}" adımından önceki hâline döndürüldü: ${r.restored} dosya geri yüklendi${r.moved.length ? `, sonradan oluşan ${r.moved.length} dosya silinmedi, şuraya taşındı: ${r.trash}` : ''}. "Devam et" ile bu adımdan itibaren yeniden çalıştırabilirsin.`);
+          save(); emit('project', p); return json(res, { ok: true, ...r });
+        }
+        if (parts[3] === 'rerun') { const r = (p.runs || []).find(x => x.id === b.run); if (!r) return json(res, { error: 'çalıştırma bulunamadı' }, 404); p.pendingPlan = { id: uid(), tasks: r.tasks.filter(x => !x.kind).map(({ id, agent, instruction, deliverable, needs }) => ({ id, agent, instruction, deliverable, needs })), research: [], needs: [], reply: 'Önceki çalıştırmanın planı yeniden yüklendi. Onaylarsan aynı görevler tekrar çalışır.', questions: [] }; post(p, 'ceo', 'user', p.pendingPlan.reply, { plan: p.pendingPlan }); save(); emit('project', p); return json(res, { ok: true }); }
         if (parts[3] === 'settings') { if (b.budget != null) { p.budget = Math.max(0, Math.round(+b.budget || 0)); p.warned = false; if (p.cancelled && !p.executing) p.cancelled = false; } if (b.autoLow != null) p.autoLow = !!b.autoLow; save(); emit('project', p); return json(res, { ok: true }); }
         if (parts[3] === 'delete') {   // projeyi sil: kayıtlar gider; çalışma klasörü SADECE uygulamanın kendi klasörüyse ve istenirse silinir
           if (p.executing) stopProject(p);
@@ -846,6 +1251,15 @@ http.createServer(async (req, res) => {
         if (parts[3] === 'open') { if (process.platform === 'win32') spawn('explorer', [wsDir(p)], { detached: true, stdio: 'ignore' }).unref(); return json(res, { ok: true, dir: wsDir(p) }); }
       }
       if (req.method === 'GET' && parts[1] === 'projects' && p && parts[3] === 'files') return json(res, { dir: wsDir(p), files: listFiles(wsDir(p)) });
+      if (req.method === 'GET' && parts[1] === 'projects' && parts[3] === 'preview' && S.projects.find(x => x.id === parts[2])) {
+        const p = S.projects.find(x => x.id === parts[2]), dir = wsDir(p), entry = entryHtml(dir);
+        const pages = walk(dir, 300).filter(x => /\.html?$/i.test(x)).map(x => path.relative(dir, x).replace(/\\/g, '/')).slice(0, 30);
+        return json(res, { port: PREVIEW_PORT, base: PREVIEW_PORT ? `http://127.0.0.1:${PREVIEW_PORT}/${p.id}/` : null, entry: entry ? path.relative(dir, entry).replace(/\\/g, '/') : null, pages });
+      }
+      if (req.method === 'GET' && parts[1] === 'shot' && /^[\w-]+$/.test(parts[2] || '') && /^[\w-]+$/.test(parts[3] || '') && /^(masaustu|mobil)\.png$/.test(parts[4] || '')) {
+        const fp = path.join(SHOTS, parts[2], parts[3], parts[4]); if (!fs.existsSync(fp)) { res.writeHead(404); return res.end(); }
+        res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'no-cache' }); return res.end(fs.readFileSync(fp));
+      }
       if (req.method === 'POST' && parts[1] === 'agents' && !parts[2]) { const b = await body(req); try { return json(res, { ok: true, key: addAgent(b) }); } catch (e) { return json(res, { error: e.message }, 400); } }
       if (req.method === 'POST' && parts[1] === 'agents' && parts[3] === 'delete') { try { removeAgent(parts[2]); return json(res, { ok: true }); } catch (e) { return json(res, { error: e.message }, 400); } }
       if (parts[1] === 'layout') {   // ofis düzeni (data/layout.json)
@@ -876,7 +1290,7 @@ http.createServer(async (req, res) => {
         } else { S.settings.cli = true; checkAuth(); checkProviders(); }
         save(); emit('state', publicState()); return json(res, { ok: true, on: S.settings.cli !== false });
       }
-      if (req.method === 'POST' && parts[1] === 'settings') { const b = await body(req); if (b.lang === 'tr' || b.lang === 'en') S.settings.lang = b.lang; if ([1, 2, 3].includes(+b.parallel)) S.settings.parallel = +b.parallel; if (b.providers && typeof b.providers === 'object') for (const k of ['codex', 'antigravity']) { const v = b.providers[k]; if (!v || typeof v !== 'object') continue; const c = S.settings.providers[k]; if (v.on != null) c.on = !!v.on; if (v.model != null) c.model = safeModel(v.model); if (k === 'antigravity' && v.trust != null) c.trust = !!v.trust; } if (b.resetRouting) S.routing = {}; for (const k of ['subUsd', 'hourTry', 'usdTry']) if (b[k] !== undefined) S.settings[k] = Math.max(0, +b[k] || 0) || null; if (b.baseMin && typeof b.baseMin === 'object') S.settings.baseMin = Object.fromEntries(Object.entries(b.baseMin).filter(([k, v]) => S.agents[k] && +v > 0).map(([k, v]) => [k, Math.min(2400, +v)])); save(); emit('state', publicState()); return json(res, { ok: true }); }
+      if (req.method === 'POST' && parts[1] === 'settings') { const b = await body(req); if (b.lang === 'tr' || b.lang === 'en') S.settings.lang = b.lang; if ([1, 2, 3].includes(+b.parallel)) S.settings.parallel = +b.parallel; if (b.review !== undefined && [0, 1, 2].includes(+b.review)) S.settings.review = +b.review; if (b.providers && typeof b.providers === 'object') for (const k of ['codex', 'antigravity']) { const v = b.providers[k]; if (!v || typeof v !== 'object') continue; const c = S.settings.providers[k]; if (v.on != null) c.on = !!v.on; if (v.model != null) c.model = safeModel(v.model); if (k === 'antigravity' && v.trust != null) c.trust = !!v.trust; } if (b.resetRouting) S.routing = {}; for (const k of ['subUsd', 'hourTry', 'usdTry']) if (b[k] !== undefined) S.settings[k] = Math.max(0, +b[k] || 0) || null; if (b.baseMin && typeof b.baseMin === 'object') S.settings.baseMin = Object.fromEntries(Object.entries(b.baseMin).filter(([k, v]) => S.agents[k] && +v > 0).map(([k, v]) => [k, Math.min(2400, +v)])); save(); emit('state', publicState()); return json(res, { ok: true }); }
       if (req.method === 'POST' && parts[1] === 'event') {   // dış araçlar durum bildirebilir: {name, state: working|idle|blocked|done, note}
         if (process.env.OFIS_API_TOKEN && req.headers['x-ofis-token'] !== process.env.OFIS_API_TOKEN) return json(res, { error: 'token gerekli' }, 401);
         const b = await body(req); const name = String(b.name || '').trim().slice(0, 24); if (!name) return json(res, { error: 'name gerekli' }, 400);
@@ -899,4 +1313,25 @@ http.createServer(async (req, res) => {
   console.log(`Ofis hazır → http://localhost:${PORT}  (Claude Code: ${CLAUDE ? CLAUDE : 'bulunamadı'}${FORCE_DEMO ? ', test modu' : ''})`);
   if (!SHOWCASE) { checkAuth(); checkProviders(); }
 });
+
+// ---------- Canlı önizleme ----------
+// Üretilen site/oyun AYRI bir porttan, salt okunur ve yalnızca projenin çalışma klasöründen sunulur. Ayrı port = ayrı köken:
+// sayfanın JavaScript'i uygulamanın API'sine istek atamaz (API yalnızca kendi portundan gelen tarayıcı isteklerini kabul eder).
+const PREVIEW_MIME = { ...MIME, '.htm': 'text/html; charset=utf-8', '.mjs': 'text/javascript', '.json': 'application/json', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp',
+  '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.md': 'text/plain; charset=utf-8', '.csv': 'text/plain; charset=utf-8' };
+let PREVIEW_PORT = Number(process.env.OFIS_PREVIEW_PORT || PORT + 1);
+http.createServer((req, res) => {
+  try {
+    const host = req.headers.host || '';
+    if (!new RegExp(`^(localhost|127\\.0\\.0\\.1):${PREVIEW_PORT}$`).test(host) || req.method !== 'GET') { res.writeHead(403); return res.end('yasak'); }
+    const url = new URL(req.url, 'http://x'), [pid, ...rest] = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+    const p = S.projects.find(x => x.id === pid); if (!p) { res.writeHead(404); return res.end('proje yok'); }
+    const root = wsDir(p), fp = path.resolve(root, rest.join('/') || 'index.html');
+    if (!(fp === root || fp.toLowerCase().startsWith(root.toLowerCase() + path.sep)) || rest.some(x => x.startsWith('.'))) { res.writeHead(403); return res.end('yasak'); }
+    const file = fs.existsSync(fp) && fs.statSync(fp).isDirectory() ? path.join(fp, 'index.html') : fp;
+    if (!fs.existsSync(file) || !fs.statSync(file).isFile()) { res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }); return res.end('Dosya yok: ' + rest.join('/')); }
+    res.writeHead(200, { 'content-type': PREVIEW_MIME[path.extname(file).toLowerCase()] || 'application/octet-stream', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
+    fs.createReadStream(file).pipe(res);
+  } catch { res.writeHead(500); res.end(); }
+}).on('error', e => { console.log(`Önizleme sunucusu açılamadı (${e.code}); önizleme kapalı.`); PREVIEW_PORT = 0; }).listen(PREVIEW_PORT, '127.0.0.1');
 

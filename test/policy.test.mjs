@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   classify, outsidePaths, isSafeReadOnly, parseInstalls, typoOf, lev, verdict,
-  scoreTask, validateDir, splitSummary, rubricOf, TEMPLATES, cut, parseUsage,
+  scoreTask, validateDir, splitSummary, rubricOf, reviewOf, fixesOf, critiqueOf, repliesOf, decisionsOf, TEMPLATES, cut, parseUsage,
 } from '../lib/policy.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -199,4 +199,40 @@ test('TEMPLATES: şablon planları tutarlı', () => {
     }
     assert.equal(t.tasks.at(-1).agent, 'auditor', k + ': son görev denetim olmalı');
   }
+});
+
+test('reviewOf: akran incelemesi kararı ve önerileri', () => {
+  const r = reviewOf('Dosyaları okudum.\n```json\n{"karar":"revize","guclu":"net yapı","oneriler":["Menüye z-index ekle","", "Form e-postasını doğrula"]}\n```');
+  assert.equal(r.karar, 'revize');
+  assert.deepEqual(r.oneriler, ['Menüye z-index ekle', 'Form e-postasını doğrula']);
+  assert.equal(r.rest, 'Dosyaları okudum.');
+  assert.equal(reviewOf('{"karar":"revize","oneriler":[]}').karar, 'onay', 'önerisiz revize onaya döner');
+  assert.equal(reviewOf('{"karar":"onay"}').karar, 'onay');
+  assert.equal(reviewOf('JSON yok'), null);
+  assert.equal(reviewOf('{"karar":"revize","oneriler":["1","2","3","4","5","6","7"]}').oneriler.length, 5);
+});
+
+test('fixesOf: denetçi düzeltmeleri ajana göre gruplanır', () => {
+  const rb = rubricOf({ response: 'Rapor\n{"developer":{"dogruluk":7,"tamlik":8,"talimat":7},"duzeltmeler":[{"ajan":"Developer","is":"z-index ekle"},{"ajan":"designer","is":"H1 boyutunu büyüt"},{"ajan":"","is":"x"},{"ajan":"developer","is":""}]}' });
+  assert.ok(rb, 'düzeltmeli rubrik ayrıştırılmalı');
+  assert.equal(rb.json.developer.dogruluk, 7);
+  assert.deepEqual(fixesOf(rb.json), { developer: ['z-index ekle'], designer: ['H1 boyutunu büyüt'] });
+  assert.deepEqual(fixesOf({}), {});
+  assert.deepEqual(fixesOf(null), {});
+});
+
+test('ekip toplantısı: değerlendirme, yanıt ve karar ayrıştırılır', () => {
+  const c = critiqueOf('Okudum.\n{"olmus":["Renkler tutarlı"],"olmamis":[{"sahip":"Developer","konu":"Form e-postayı doğrulamıyor","oneri":"type=email ekle"},{"sahip":"writer","konu":""}],"olabilir":[{"sahip":"writer","oneri":"SSS bölümü"}]}');
+  assert.deepEqual(c.olmus, ['Renkler tutarlı']);
+  assert.deepEqual(c.olmamis, [{ sahip: 'developer', text: 'Form e-postayı doğrulamıyor → type=email ekle' }]);
+  assert.equal(c.olabilir[0].text, 'SSS bölümü');
+  assert.equal(critiqueOf('JSON yok'), null);
+  const ys = repliesOf('{"yanitlar":[{"no":1,"karar":"Katılıyorum","not":"haklı"},{"no":2,"karar":"katılmıyorum","not":"kapsam dışı"},{"no":"3","karar":"kısmen"},{"karar":"x"}]}');
+  assert.deepEqual(ys.map(y => [y.no, y.karar]), [[1, 'katiliyorum'], [2, 'katilmiyorum'], [3, 'kismen']]);
+  assert.deepEqual(repliesOf('yok'), []);
+  const d = decisionsOf('{"ozet":"Form düzeltilecek.","kararlar":[{"sahip":"Developer","is":"E-posta doğrulaması ekle"},{"sahip":"writer","is":""}],"reddedilen":[{"no":2,"neden":"kapsam dışı"}]}');
+  assert.equal(d.ozet, 'Form düzeltilecek.');
+  assert.deepEqual(d.kararlar, [{ sahip: 'developer', is: 'E-posta doğrulaması ekle' }]);
+  assert.deepEqual(d.reddedilen, [{ no: 2, neden: 'kapsam dışı' }]);
+  assert.equal(decisionsOf('yok'), null);
 });

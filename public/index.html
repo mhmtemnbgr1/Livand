@@ -118,6 +118,10 @@ code{font:12px var(--fm);background:var(--paper2);padding:1px 5px;border-radius:
 .m .h{font:600 12px var(--fd);letter-spacing:.03em;display:flex;align-items:center;gap:6px}.m .h i.to{font-weight:400;color:var(--mut);font-style:normal}
 .m .b{white-space:pre-wrap;word-break:break-word}
 .m .f{font:10.5px var(--fm);color:var(--mut);text-align:right;margin-top:2px}
+.acc{margin-bottom:10px}.ac{font-size:12.5px;padding:3px 0;color:var(--mut)}.ac b{color:var(--mut);margin-right:4px}.ac.ok b{color:var(--ok)}.ac.bad b{color:var(--bad)}.ac.ok,.ac.bad{color:var(--ink)}
+.caps{display:inline-flex;flex-wrap:wrap;gap:4px;margin-left:6px;vertical-align:middle}.caps i{font:600 10.5px var(--fd);font-style:normal;letter-spacing:.04em;padding:1px 6px;border-radius:10px;background:#e4eefb;color:#2c5d9e;border:1px solid #c5d8f2}
+.step .caps{display:flex;margin:4px 0 2px}
+.m.mt{border-left-color:#8a84ad;background:#f1eff8;max-width:100%;align-self:stretch}
 .m.ho{background:transparent;border:1px dashed var(--line2);font-size:12px;color:var(--mut);max-width:100%}
 .m.sc{background:#f6edd2}
 .m.plan{background:var(--card);border:1px solid var(--line2);border-top:3px solid var(--ok);max-width:100%;align-self:stretch}
@@ -157,6 +161,14 @@ pre{white-space:pre-wrap;word-break:break-word;background:var(--paper2);border:1
 .tag.doing{border-color:var(--ok);color:var(--ok)}.tag.done{background:var(--ok);border-color:var(--ok);color:#fff}.tag.bad{background:var(--bad);border-color:var(--bad);color:#fff}
 .si{margin:3px 0 1px;font-size:13px}
 .sm{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:11.5px;color:var(--mut)}
+.kd{font:600 10px var(--fd);letter-spacing:.06em;text-transform:uppercase;padding:1px 6px;border-radius:3px;background:var(--paper2);color:var(--mut)}
+.rv{margin:6px 0 2px;padding:5px 8px;border-left:3px solid var(--line2);border-radius:0 4px 4px 0;background:var(--paper2);font-size:12px;color:var(--mut)}
+.rv.ok{border-left-color:var(--ok)}.rv.fix{border-left-color:var(--warn)}
+.sk{border:1px solid var(--line2);border-radius:6px;padding:6px 8px;margin:4px 0;display:flex;flex-wrap:wrap;align-items:center;gap:2px 8px}.sk.off{opacity:.55}
+#mbox .sk .skh,.sk .skh{display:flex;align-items:center;gap:6px;flex:1;margin:0;font:500 13px "Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;text-transform:none;letter-spacing:0;color:var(--ink);cursor:pointer}.sk .skh input{width:auto;margin:0}
+.sk>.stl,.sk>details{flex-basis:100%}.sk details{font-size:12px}.sk summary{cursor:pointer;color:var(--mut)}.sk ul{margin:4px 0;padding-left:18px}
+.sk button{padding:3px 8px;font-size:12px}.skadd{display:flex;flex-direction:column;gap:6px;margin-top:6px}.skadd textarea{min-height:70px}
+.rv summary{cursor:pointer}.rv ul{margin:4px 0 0;padding-left:18px}.rv li{margin:2px 0}
 .prog{height:3px;border-radius:2px;background:var(--paper2);margin-top:6px;overflow:hidden}.prog i{display:block;height:100%;width:40%;background:var(--ok);animation:slide 1.3s ease-in-out infinite}
 @keyframes slide{0%{margin-left:-40%}100%{margin-left:100%}}
 .run{display:flex;gap:10px;align-items:center;padding:7px 0;border-bottom:1px dashed var(--line2);font-size:12.5px}.run .stl{flex:1}.run button{font-size:12px;padding:4px 9px}
@@ -179,6 +191,13 @@ pre{white-space:pre-wrap;word-break:break-word;background:var(--paper2);border:1
 .card .ch{display:flex;align-items:center;gap:6px;font:600 11px var(--fd);color:var(--mut);text-transform:uppercase;letter-spacing:.12em;margin-bottom:2px}.card .ch .ib{width:26px;height:26px;font-size:15px}
 .card .mut{font-size:12.5px;padding:4px 0}
 .card .row{display:flex;align-items:center;gap:6px;padding:4px 0;font-size:13px}.card .row input{width:110px}
+.prv{padding:8px 0;border-bottom:1px solid var(--line2)}.prv:last-of-type{border-bottom:0}
+.prv-h{display:flex;align-items:center;gap:8px;font-size:13px;flex-wrap:wrap}.prv-h b{white-space:nowrap}
+.prv-c{display:flex;align-items:center;gap:6px;margin-top:6px;flex-wrap:wrap}
+.prv-c input[data-pmodel]{flex:1 1 120px;min-width:0;width:auto;padding:6px 8px;font-size:12.5px}
+.prv-c button{padding:6px 10px;font-size:12.5px;white-space:nowrap}
+.prv-t{display:flex;align-items:center;gap:6px;margin-top:6px;cursor:pointer}.prv-t input{width:auto;margin:0}
+.prv small.stl{display:block;margin-top:4px}
 .lr{display:flex;align-items:center;gap:8px;padding:2px 0;font-size:13px}.lr b{font:600 13px var(--fd);letter-spacing:.02em}.lr small{color:var(--mut);font-size:12px}
 .lr2{padding:6px 0;border-bottom:1px dashed var(--line)}.lr2:last-child{border-bottom:none}
 .lr2 .bb{height:8px;border-radius:2px;background:var(--paper2);border:1px solid var(--line);overflow:hidden;margin:5px 0 3px}.lr2 .bb i{display:block;height:100%;background:var(--ok)}.lr2 .bb i.q{background:var(--warn)}.lr2 .bb i.bad{background:var(--bad)}
@@ -217,6 +236,14 @@ table.mt{width:100%;border-collapse:collapse;font-size:12.5px}.mt td,.mt th{padd
 .sch{display:flex;gap:8px;font-size:12px;padding:3px 0;border-bottom:1px solid var(--line)}.sch b{color:var(--acc);min-width:30px}
 
 /* ===== pencereler ===== */
+#pv{position:fixed;inset:0;z-index:21;background:rgba(20,17,12,.55);display:none;place-items:center}#pv.on{display:grid}
+#pvbox{width:96vw;height:92vh;display:flex;flex-direction:column;padding:10px 12px;border-top:4px solid var(--acc)}
+.pvbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px}.pvbar select{max-width:220px}
+.pvwrap{flex:1;min-height:0;display:flex;justify-content:center;align-items:flex-start;background:var(--paper2);border-radius:6px;overflow:auto}
+#pvf{border:0;background:#fff;width:100%;height:100%}#pvf.mob{width:390px;max-width:100%;height:844px;max-height:100%;box-shadow:0 0 0 1px var(--line2)}
+.vf{margin:0 0 12px;padding:8px 10px;border:1px solid var(--line2);border-radius:6px}.vf .shots{display:flex;gap:8px;margin-top:6px;align-items:flex-start}
+.vf .shots img{border:1px solid var(--line2);border-radius:4px;cursor:zoom-in;max-height:120px;background:#fff}.vf ul{margin:4px 0 0;padding-left:18px;font-size:12px}
+.step .rvt{margin-top:6px;padding:3px 8px;font-size:11.5px}
 #modal{position:fixed;inset:0;z-index:20;background:rgba(20,17,12,.55);display:none;place-items:center}
 #modal.on{display:grid}
 #mbox{width:min(600px,94vw);max-height:90vh;overflow:auto;padding:18px 20px;border-top:4px solid var(--acc)}
@@ -273,6 +300,7 @@ body.mini #inbox{top:56px;left:8px;width:calc(100vw - 16px)}
   <button class="ib ghost" id="langBtn" title="Dil / Language">TR</button>
   <button class="ib ghost" id="bellBtn" title="Bildirim sesi"><svg id="bellOn" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg></button>
   <button class="ib ghost" id="inboxBtn" title="Onay kutusu"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg><b id="ibn"></b></button>
+  <button class="ib ghost" id="prevBtn" title="Önizleme — ekibin ürettiği site/oyun"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
   <button class="ib ghost" id="newProj" title="Yeni proje">+</button>
   <button class="ib ghost" id="delProj" title="Projeyi sil"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6"/></svg></button>
   <button class="ib ghost" id="openDir" title="Çalışma klasörü">
@@ -307,6 +335,8 @@ body.mini #inbox{top:56px;left:8px;width:calc(100vw - 16px)}
 <div id="boot" class="glass"><div class="spin" id="bootspin"></div><div id="bootmsg">Ofis yükleniyor…</div><button id="bootLow" style="display:none">Düşük kaliteyle aç</button></div>
 <div id="inbox" class="glass"><div id="ibh"><b>Onay kutusu</b><span class="sp"></span><label title="Salt okunur (arama/okuma) istekleri kendiliğinden onaylanır"><input type="checkbox" id="autoLow"> düşük riski otomatik onayla</label><button class="ghost" id="ibClose">✕</button></div><div style="padding:6px 12px 0;display:none" id="ibbulk"><button id="ibLow">Düşük riskli hepsini onayla</button></div><div id="iblist"></div></div>
 <div id="modal"><div id="mbox" class="glass"></div></div>
+<div id="pv"><div id="pvbox" class="glass"><div class="pvbar"><b>Önizleme</b><select id="pvPage" aria-label="Sayfa"></select><span class="sp"></span><button class="seg pri" data-pv="desk">Masaüstü</button><button class="seg" data-pv="mob">Mobil</button><button id="pvRe">Yenile</button><button id="pvOpen" title="Varsayılan tarayıcıda aç">Tarayıcıda aç</button><button id="pvX">Kapat</button></div>
+<div id="pvMsg" class="stl"></div><div class="pvwrap"><iframe id="pvf" title="Önizleme" sandbox="allow-scripts allow-forms allow-popups allow-modals allow-same-origin allow-pointer-lock"></iframe></div></div></div>
 
 <script type="importmap">{"imports":{"three":"/vendor/three.module.js","three/addons/":"/vendor/addons/"}}</script>
 <script type="module" src="office3d.js"></script>
@@ -356,13 +386,29 @@ function bubble(m){
   if(m.plan)return planCard(m,f);
   if(m.approvalId)return approvalCard(m,f);
   const req=m.reqId?ST.requests.find(r=>r.id===m.reqId):null;
-  return`<div class="m ${me?'me':''} ${m.score?'sc':''} ${m.levelUp?'lvup':''}" ${req?`data-req="${req.id}"`:''}><div class="h" style="color:${f.color}">${av(m.from)} ${esc(f.name)}${me?'':` <i class="to">→ ${esc(t.name)}</i>`}</div><div class="b">${esc(m.text)}</div><div class="f">${req?`${esc(req.model)} · ↓${req.tin} ↑${req.tout} · `:''}${hm(m.ts)}</div></div>`;
+  return`<div class="m ${me?'me':''} ${m.meet?'mt':''} ${m.score?'sc':''} ${m.levelUp?'lvup':''}" ${req?`data-req="${req.id}"`:''}><div class="h" style="color:${f.color}">${av(m.from)} ${esc(f.name)}${me?'':m.meet?` <i class="to">· ekip toplantısı</i>`:` <i class="to">→ ${esc(t.name)}</i>`}</div><div class="b">${esc(m.text)}</div><div class="f">${req?`${esc(req.model)} · ↓${req.tin} ↑${req.tout} · `:''}${hm(m.ts)}</div></div>`;
 }
+const capName=id=>(ST.capabilities||[]).find(c=>c.id===id)?.name||id;
+const capChips=ids=>(ids||[]).length?`<span class="caps">${ids.map(id=>`<i title="${esc((ST.capabilities||[]).find(c=>c.id===id)?.desc||'')}">${esc(capName(id))}</i>`).join('')}</span>`:'';
+let pvInfo=null;
+async function openPreview(){const p=proj();if(!p)return;pvInfo=await api('projects/'+p.id+'/preview');if(!pvInfo||!pvInfo.base){alert('Önizleme sunucusu açılamadı.');return}
+  const pages=pvInfo.pages.length?pvInfo.pages:['index.html'];$('#pvPage').innerHTML=pages.map(x=>`<option ${x===pvInfo.entry?'selected':''}>${esc(x)}</option>`).join('');
+  $('#pvMsg').textContent=pvInfo.pages.length?'Ekip dosyaları değiştirdikçe önizleme kendiliğinden yenilenir.':'Henüz HTML sayfası yok; ekip bir sayfa üretince burada görünür.';$('#pv').classList.add('on');loadPv()}
+const pvUrl=()=>pvInfo.base+($('#pvPage').value||'index.html').split('/').map(encodeURIComponent).join('/');
+function loadPv(){if(pvInfo)$('#pvf').src=pvUrl()+'?t='+Date.now()}
+$('#prevBtn').onclick=openPreview;$('#pvRe').onclick=loadPv;$('#pvPage').onchange=loadPv;
+$('#pvX').onclick=()=>{$('#pv').classList.remove('on');$('#pvf').src='about:blank'};
+$('#pv').onclick=e=>{if(e.target.id==='pv')$('#pvX').click()};
+$('#pvOpen').onclick=()=>{if(pvInfo)window.open(pvUrl(),'_blank','noopener')};
+document.querySelectorAll('[data-pv]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-pv]').forEach(x=>x.classList.toggle('pri',x===b));$('#pvf').classList.toggle('mob',b.dataset.pv==='mob')});
 function planCard(m,f){
   const p=proj(),pl=m.plan,active=p.pendingPlan&&p.pendingPlan.id===pl.id;
-  const tl=pl.tasks.map(t=>`<li><b style="color:${who(t.agent).color}">${esc(ROLE[t.agent]||who(t.agent).name)}</b> — ${esc(t.instruction)}${t.deliverable?` <span class="stl">→ ${esc(t.deliverable)}</span>`:''}</li>`).join('');
+  const tl=pl.tasks.map(t=>`<li><b style="color:${who(t.agent).color}">${esc(ROLE[t.agent]||who(t.agent).name)}</b>${t.role==='yapimci'?' <span class="kd">yapımcı</span>':''} — ${esc(t.instruction)}${t.deliverable?` <span class="stl">→ ${esc(t.deliverable)}</span>`:''}${capChips(t.caps)}${(t.criteria||[]).length?` <span class="stl">[${t.criteria.map(esc).join(', ')}]</span>`:''}</li>`).join('');
   return`<div class="m plan"><div class="h" style="color:${f.color}">${av(m.from)} Plan</div><div class="b">${esc(pl.reply)}</div>
+  ${pl.vision?`<div class="lbl2">Ortak vizyon</div><ul>${Object.entries(pl.vision).map(([k,v])=>`<li><b>${{amac:'Amaç',kitle:'Kitle',basari:'Başarı ölçütü',kapsam:'Kapsam',tarz:'Tarz',yapi:'Yapı'}[k]||esc(k)}:</b> ${esc(v)}</li>`).join('')}</ul>`:''}
+  ${(pl.criteria||[]).length?`<div class="lbl2">Kabul ölçütleri — iş bunlar karşılanınca bitmiş sayılır</div><ul>${pl.criteria.map(c=>`<li><b>${esc(c.id)}</b> ${esc(c.olcut)}</li>`).join('')}</ul>`:''}
   ${pl.research.length?`<div class="lbl2">Araştırma</div><ul>${pl.research.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`:''}
+  ${pl.mode==='urun'?`<div class="lbl2">Çalışma biçimi</div><div class="stl">Ürünü <b>tek yapımcı</b> baştan sona yazar (tasarım dahil); diğerleri girdi hazırlar, sonra ekran görüntülerine bakıp gözden geçirir; yapımcı geri bildirimi süzüp uygular.</div>`:''}
   <div class="lbl2">Görevler</div><ul>${tl}</ul>
   ${pl.needs.length?`<div class="lbl2">İzin isteyebilecekleri</div><ul>${pl.needs.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`:''}
   ${active?`<div class="btns"><button class="pri" data-act="plan-ok">Onayla ve başlat</button><button data-act="plan-rev">Değişiklik iste</button><button data-act="plan-no">İptal</button></div>`:'<div class="stl">Plan işlendi.</div>'}</div>`;
@@ -415,12 +461,20 @@ function growthHtml(a){
     ${f&&f.key?`<div class="gwf"><b>Gelişim alanı:</b> ${esc(f.tip)} <span class="stl">(${f.value}/100)</span></div>`:''}${f&&f.strong&&f.strong.length?`<div class="stl">Güçlü yönleri: ${f.strong.map(esc).join(', ')}</div>`:''}
     ${c?`<details><summary>Mesleki standartları (${esc(c.title)})</summary><ul>${c.standards.map(x=>'<li>'+esc(x)+'</li>').join('')}</ul><div class="stl">Teslim öncesi: ${c.checklist.map(esc).join(' ')}</div></details>`:''}</div>`;
 }
+function skillRow(k,i){
+  return`<div class="sk${k.on?'':' off'}"><label class="skh"><input type="checkbox" data-sk="${i}" ${k.on?'checked':''}><b>${esc(k.name)}</b>${k.own?'<i class="src">senin</i>':''}</label>${k.own?`<button class="ghost" data-skdel="${i}" title="Beceriyi sil">Sil</button>`:''}
+    <div class="stl">${esc(k.desc||'')}${k.desc?' · ':''}${k.always&&!k.when?'her görevde':'tetikleyen: '+esc(k.when||'')}</div>
+    <details><summary>Adımlar</summary><ul>${(k.steps||[]).map(x=>'<li>'+esc(x)+'</li>').join('')}</ul>${(k.done||[]).length?'<div class="stl">Bitti sayılması için: '+k.done.map(esc).join(' ')+'</div>':''}</details></div>`;
+}
 function editAgent(id){
-  const a=ST.agents[id];let mem=(a.lessons||[]).map(x=>({...x}));
+  const a=ST.agents[id];let mem=(a.lessons||[]).map(x=>({...x}));let sks=(a.skillList||[]).map(x=>({...x}));
   modal(`<h3>${av(id)} ${esc(ROLE[id]||a.title)}</h3>
   <label>Ad</label><input id="f_name" value="${esc(a.name)}">
   <label>Rol</label><input id="f_title" value="${esc(a.title)}">
   ${growthHtml(a)}
+  <label>Becerileri — görevine uyan en fazla 3 tanesi her işte istem içine girer (3 CLI'de de çalışır)</label><div id="skl"></div>
+  <div class="btns"><button id="skAddBtn">+ Beceri ekle</button></div>
+  <div id="skAdd" class="skadd" hidden><input id="sk_name" placeholder="Beceri adı (örn. Instagram gönderisi)"><input id="sk_when" placeholder="Tetikleyen kelimeler, virgülle (boş = her görevde)"><textarea id="sk_steps" placeholder="Adımlar — her satıra bir adım"></textarea><div class="btns" style="justify-content:flex-end"><button id="skCancel">Vazgeç</button><button class="pri" id="skOk">Ekle</button></div></div>
   <label>Çalıştığı CLI — "Otomatik" seçilirse iş türüne göre en iyi sonuç veren CLI'yi kendisi öğrenir</label><select id="f_prov">${PROV_OPTS.map(([k,t])=>`<option value="${k}" ${(a.provider||'auto')==k?'selected':''}>${t}${k!=='claude'&&k!=='auto'&&!(ST.providers||[]).find(x=>x.key===k)?.usable?' (kapalı)':''}</option>`).join('')}</select>
   <label>Model (Claude Code için; diğer CLI'lerin modeli Analiz → CLI sağlayıcıları)</label><select id="f_model">${['opus','sonnet','haiku'].map(m=>`<option ${a.model==m?'selected':''}>${m}</option>`).join('')}</select>
   <label>Maks. adım (düşük = daha az token)</label><input id="f_turns" type="number" value="${a.turns}">
@@ -431,7 +485,16 @@ function editAgent(id){
   <div class="btns" style="justify-content:flex-end;margin-top:14px">${id!=='ceo'?'<button id="delAg" style="margin-right:auto;color:var(--bad)">Ajanı sil</button>':''}<button id="mc">Kapat</button><button class="pri" id="ms">Kaydet</button></div>`,()=>{
     const d=$('#delAg');if(d)d.onclick=()=>{if(confirm(a.name+' silinsin mi? Puanları ve dersleri de gider.')){api('agents/'+id+'/delete',{});closeModal()}};
     document.querySelectorAll('.mem button').forEach(b=>b.onclick=()=>{mem[+b.dataset.i]=null;b.parentElement.remove()});
-    $('#ms').onclick=()=>{api('agents/'+id,{name:$('#f_name').value,title:$('#f_title').value,model:$('#f_model').value,provider:$('#f_prov').value,turns:$('#f_turns').value,tools:$('#f_tools').value,directive:$('#f_dir').value,lessons:mem.filter(Boolean)});closeModal();openPanel()};
+    const drawSk=()=>{const box=$('#skl');box.innerHTML=sks.map((k,i)=>k?skillRow(k,i):'').join('')||'<span class="stl">Bu rol için hazır beceri yok; kendi becerini ekleyebilirsin.</span>';
+      box.querySelectorAll('[data-sk]').forEach(c=>c.onchange=()=>{sks[+c.dataset.sk].on=c.checked;c.closest('.sk').classList.toggle('off',!c.checked)});
+      box.querySelectorAll('[data-skdel]').forEach(b=>b.onclick=()=>{sks[+b.dataset.skdel]=null;drawSk()})};
+    drawSk();
+    $('#skAddBtn').onclick=()=>{$('#skAdd').hidden=false;$('#sk_name').focus()};
+    $('#skCancel').onclick=()=>{$('#skAdd').hidden=true};
+    $('#skOk').onclick=()=>{const name=$('#sk_name').value.trim(),steps=$('#sk_steps').value.split('\n').map(x=>x.trim()).filter(Boolean),when=$('#sk_when').value.trim();
+      if(!name||!steps.length){alert('Ad ve en az bir adım gerekli');return}
+      sks.push({id:'',name,when,steps,done:[],on:true,own:true,always:!when,desc:''});$('#sk_name').value=$('#sk_when').value=$('#sk_steps').value='';$('#skAdd').hidden=true;drawSk()};
+    $('#ms').onclick=()=>{api('agents/'+id,{name:$('#f_name').value,title:$('#f_title').value,model:$('#f_model').value,provider:$('#f_prov').value,turns:$('#f_turns').value,tools:$('#f_tools').value,directive:$('#f_dir').value,lessons:mem.filter(Boolean),skillsOff:sks.filter(k=>k&&!k.on&&k.id).map(k=>k.id),customSkills:sks.filter(k=>k&&k.own).map(k=>({id:k.id,name:k.name,when:k.when,steps:k.steps,desc:k.desc}))});closeModal();openPanel()};
   });
 }
 function addAgentModal(){
@@ -487,10 +550,13 @@ document.addEventListener('click',e=>{
   else if(act==='ap-always')api('approvals/'+b.dataset.id,{decision:'allow',always:true});
   else if(act==='ap-no')api('approvals/'+b.dataset.id,{decision:'deny'});
   else if(act==='resume')api('projects/'+p.id+'/resume',{});
+  else if(act==='preview')openPreview();
+  else if(act==='revert'){if(confirm('Çalışma klasörü bu adım başlamadan önceki hâline dönecek. Sonradan oluşan dosyalar silinmez, yedek klasörüne taşınır; geri almanın kendisi de geri alınabilir. Devam edilsin mi?'))api('projects/'+p.id+'/revert',{snap:b.dataset.snap}).then(r=>{if(r.error)alert(r.error)})}
   else if(act==='rerun')api('projects/'+p.id+'/rerun',{run:b.dataset.id});
   else if(act==='limchk'){b.disabled=true;b.textContent='…';api('limits/check',{}).then(j=>{if(j.error)notify('Ofis',j.error,'ask');else{ST.limits=j.limits;if(j.usage)ST.usage=j.usage;renderTop()}if(tab==='anal')renderAnalytics()})}
   else if(act==='svsave'){api('settings',{subUsd:+$('#sv_sub').value||0,hourTry:+$('#sv_rate').value||0,usdTry:+$('#sv_usd').value||0,baseMin:Object.fromEntries([...document.querySelectorAll('[data-base]')].map(i=>[i.dataset.base,+i.value||0]))}).then(()=>api('state')).then(s=>{ST=s;renderAnalytics()})}
   else if(act==='par')api('settings',{parallel:+b.dataset.n});
+  else if(act==='rev')api('settings',{review:+b.dataset.n});
   else if(act==='provsave'){const pv={};for(const k of ['codex','antigravity']){const m=document.querySelector(`[data-pmodel="${k}"]`);if(m)pv[k]={model:m.value.trim()}}if(!pv.antigravity)pv.antigravity={};const tr=document.querySelector('[data-ptrust]');if(tr)pv.antigravity.trust=tr.checked;api('settings',{providers:pv}).then(()=>api('state')).then(s=>{ST=s;renderAnalytics()})}
   else if(act==='pconn'){b.disabled=true;api('providers/'+b.dataset.k+'/connect',{}).then(j=>{if(j.error)notify('Ofis',j.error,'ask')})}
   else if(act==='pdisc'){if(confirm('Bu CLI\'ye yeni iş verilmesin ve çalışan işleri hemen dursun mu? (Yarım görevler Claude Code ile sürer; tekrar Bağlan ile açarsın)'))api('providers/'+b.dataset.k+'/disconnect',{})}
@@ -587,17 +653,28 @@ const ST_CLS={bekliyor:'wait','çalışıyor':'doing',bitti:'done',hata:'bad',ip
 function taskCard(x,i,all){
   const run=x.status==='çalışıyor',d=x.startedAt?dur((x.endedAt||Date.now())-x.startedAt):'';
   const deps=(x.needs||[]).map(n=>all.find(t=>t.id===n)).filter(Boolean),waitFor=deps.filter(t=>t.status!=='bitti');
-  const note=x.status==='bekliyor'&&waitFor.length?waitFor.map(t=>ROLE[t.agent]||who(t.agent).name).join(' ve ')+' bitince başlar':x.status==='bekliyor'?'Birazdan başlar':run?(d?'Çalışıyor · '+d:'Başladı'):x.status==='bitti'?(d?d+' sürdü':''):'';
+  const rn=k=>ROLE[k]||who(k).name;
+  const note=x.status==='bekliyor'&&waitFor.length?waitFor.map(t=>rn(t.agent)).join(' ve ')+' bitince başlar':x.status==='bekliyor'?'Birazdan başlar':run?({inceleme:rn(x.reviewer)+' inceliyor','düzeltme':'Önerileri uyguluyor','değerlendirme':'Herkes ürünü değerlendiriyor','tartışma':'İtirazlar tartışılıyor',karar:'CEO karar veriyor'}[x.phase]||'Çalışıyor')+(d?' · '+d:''):x.status==='bitti'?(d?d+' sürdü':''):'';
+  const rv=x.review,rvh=rv?`<div class="rv ${rv.karar==='revize'?'fix':'ok'}">${rv.karar==='revize'
+    ?`<details><summary><b>${esc(rn(rv.by))}</b> inceledi: ${rv.oneriler.length} öneri${rv.applied?' · uygulandı':x.phase==='düzeltme'?' · uygulanıyor':''}</summary><ul>${rv.oneriler.map(o=>'<li>'+esc(o)+'</li>').join('')}</ul></details>`
+    :`<b>${esc(rn(rv.by))}</b> inceledi: onay${rv.guclu?' — '+esc(rv.guclu):''}`}</div>`:'';
   return`<div class="step ${ST_CLS[x.status]||''}"><div class="sn">${i+1}</div><div class="sb">
-    <div class="sh"><span class="who" style="--c:${who(x.agent).color}">${esc(ROLE[x.agent]||who(x.agent).name)}</span><span class="tag ${ST_CLS[x.status]||''}">${ST_TXT[x.status]||esc(x.status)}</span></div>
-    <div class="si">${esc(x.instruction)}</div>
-    ${x.deliverable||note||x.provider?`<div class="sm">${x.deliverable?'<span>Çıktı: '+esc(x.deliverable)+'</span>':''}${note?'<span>'+esc(note)+'</span>':''}${x.provider?'<span title="Bu adımı çalıştıran CLI">'+esc((PROV_OPTS.find(o=>o[0]===x.provider)||[,x.provider])[1].replace(/ \(.*\)/,''))+(x.score?' · '+x.score.toFixed(1)+'/10':'')+'</span>':''}</div>`:''}
+    <div class="sh"><span class="who" style="--c:${who(x.agent).color}">${esc(rn(x.agent))}</span>${x.kind?`<span class="kd">${esc(x.kind)}</span>`:x.role==='yapimci'?'<span class="kd">yapımcı</span>':''}<span class="tag ${ST_CLS[x.status]||''}">${ST_TXT[x.status]||esc(x.status)}</span></div>
+    <div class="si"${x.kind?' style="white-space:pre-line"':''}>${esc(x.instruction)}</div>${capChips(x.caps)}${rvh}
+    ${x.deliverable||note||x.provider||(x.skills||[]).length||(x.criteria||[]).length?`<div class="sm">${x.deliverable?'<span>Çıktı: '+esc(x.deliverable)+'</span>':''}${(x.criteria||[]).length?'<span title="Bu adımın karşılaması gereken kabul ölçütleri">Ölçüt: '+x.criteria.map(esc).join(', ')+'</span>':''}${(x.skills||[]).length?'<span title="Bu adımda uygulanan beceriler">Beceri: '+x.skills.map(esc).join(', ')+'</span>':''}${note?'<span>'+esc(note)+'</span>':''}${x.provider?'<span title="Bu adımı çalıştıran CLI">'+esc((PROV_OPTS.find(o=>o[0]===x.provider)||[,x.provider])[1].replace(/ \(.*\)/,''))+(x.score?' · '+x.score.toFixed(1)+'/10':'')+'</span>':''}</div>`:''}
+    ${x.kind==='ekip toplantısı'&&x.summary&&!run?'<div class="rv ok">'+esc(x.summary)+'</div>':''}
+    ${!proj().executing&&x.snap&&x.status!=='bekliyor'?`<button class="ghost rvt" data-act="revert" data-snap="${esc(x.snap)}" title="Çalışma klasörünü bu adım başlamadan önceki hâline döndürür">↶ Bu adımdan önceye dön</button>`:''}
     ${run?'<div class="prog"><i></i></div>':''}</div></div>`;
 }
 function renderBoard(){
   const p=proj(),b=p.board||[],done=b.filter(x=>x.status==='bitti').length,open=b.some(x=>x.status!=='bitti');
   let h='';
   if(!p.executing&&b.length&&open)h+=`<div class="banner"><span>${p.interrupted?'Uygulama kapandığı için iş yarım kaldı.':'Bitmemiş adımlar var.'}</span><span class="sp"></span><button class="pri" data-act="resume">Devam et</button></div>`;
+  if((p.criteria||[]).length){const acc=p.acceptance||{},n=p.criteria.filter(c=>acc[c.id]?.durum==='gecti').length;h+=`<div class="acc"><div class="lbl2">Kabul ölçütleri · ${n}/${p.criteria.length}</div>${p.criteria.map(c=>{const a=acc[c.id],cl=a?.durum==='gecti'?'ok':a?'bad':'';return`<div class="ac ${cl}" title="${esc(a?.not||'Henüz denetlenmedi')}"><b>${a?.durum==='gecti'?'✓':a?'✗':'·'} ${esc(c.id)}</b> ${esc(c.olcut)}</div>`}).join('')}</div>`}
+  const vf=p.verify;if(vf){const c=vf.checks,vis=vf.visual,iss=c.issues.slice(0,12);h+=`<div class="vf"><div class="lbl2">Otomatik doğrulama · ${c.errors} hata · ${c.warnings} uyarı${vis?' · tarayıcıda '+vis.errors.length+' sorun':''}</div>
+    ${iss.length||(vis&&vis.errors.length)?`<details><summary class="stl">Ayrıntılar</summary><ul>${iss.map(x=>`<li>${x.sev==='hata'?'✗':'!'} <b>${esc(x.file)}</b>: ${esc(x.msg)}</li>`).join('')}${vis?vis.errors.map(e=>`<li>✗ ${esc(e)}</li>`).join(''):''}</ul></details>`:'<div class="stl">Kesin kontrollerde sorun bulunmadı.</div>'}
+    ${vis?`<div class="shots">${vis.shots.map(s=>`<img src="/api/shot/${p.id}/${esc(vf.tag)}/${esc(s)}?t=${vf.ts}" alt="${s.startsWith('mobil')?'Mobil':'Masaüstü'} ekran görüntüsü" title="Önizlemeyi aç" data-act="preview">`).join('')}</div>`:''}
+    <div class="btns"><button data-act="preview">Önizlemeyi aç</button></div></div>`}
   if(b.length)h+=`<div class="bh"><b>${done} / ${b.length}</b><span>adım bitti</span><div class="bp"><i style="width:${b.length?done/b.length*100:0}%"></i></div></div><div class="steps">${b.map((x,i)=>taskCard(x,i,b)).join('')}</div>`;
   else h+='<div class="empty">Plan onaylanınca adımlar burada görünür.</div>';
   const runs=[...(p.runs||[])].reverse();
@@ -663,11 +740,13 @@ function providersHtml(){
   const P=ST.providers||[],RT=ST.routing||{};if(!P.length)return'';
   const st=x=>x.login?['q','onay bekleniyor']:!x.installed?['mut','kurulu değil']:!x.ok?['bad',x.text||'giriş yok']:!x.on?['mut','bağlı değil']:['ok','bağlı'];
   const INST={codex:'npm install -g @openai/codex',antigravity:'irm https://antigravity.google/cli/install.ps1 | iex'};
-  const ctl=x=>x.key==='claude'?'<small class="stl">ana CLI · onay kutusu bağlı · üstteki CLI düğmesiyle kesilir</small>':x.login?`<button data-act="pdisc" data-k="${x.key}">Vazgeç</button><div class="stl" style="flex-basis:100%">${esc(x.login.text)}${x.login.url?` <button class="pri" data-act="popen" data-k="${x.key}">Onay sayfasını aç</button>`:''}</div>`:!x.installed?`<button data-act="pchk" data-k="${x.key}" title="Kurduktan sonra yeniden denetle">↻</button><div class="stl" style="flex-basis:100%">Kurmak için terminalde: <code style="word-break:break-all">${esc(INST[x.key])}</code></div>`:x.usable?`<button data-act="pdisc" data-k="${x.key}">Bağlantıyı kes</button><button class="ghost" data-act="plogout" data-k="${x.key}" title="CLI'nin kendi girişini de sil">Çıkış yap</button>`:`<button class="pri" data-act="pconn" data-k="${x.key}" title="CLI'nin kendi girişi açılır; onayı tarayıcıda verirsin">Bağlan</button>`;
-  const rows=P.map(x=>{const[c,t]=st(x);return`<div class="row" style="flex-wrap:wrap;gap:4px 8px" title="${esc(x.src||'')}"><b style="white-space:nowrap">${esc(x.label)}</b><span class="lp ${c}" style="white-space:nowrap">${esc(t)}</span><span class="sp"></span>${ctl(x)}${x.key!=='claude'&&x.installed?`<div style="flex-basis:100%;display:flex;gap:8px;align-items:center"><input data-pmodel="${x.key}" placeholder="model (boş = varsayılan)" value="${esc(x.model||'')}" style="width:140px">${x.key==='antigravity'?`<label class="stl" title="Komut çalıştırma izinlerini de sormadan verir (yine sandbox içinde). Kapalıyken sadece dosya düzenleyebilir, komutlar reddedilir."><input type="checkbox" data-ptrust ${x.trust?'checked':''}> tam yetki</label>`:''}</div>`:''}</div>`}).join('');
+  const btns=x=>x.key==='claude'?'':x.login?`<button data-act="pdisc" data-k="${x.key}">Vazgeç</button>${x.login.url?`<button class="pri" data-act="popen" data-k="${x.key}">Onay sayfasını aç</button>`:''}`:!x.installed?`<button data-act="pchk" data-k="${x.key}" title="Kurduktan sonra yeniden denetle">↻ Denetle</button>`:x.usable?`<button data-act="pdisc" data-k="${x.key}">Bağlantıyı kes</button><button class="ghost" data-act="plogout" data-k="${x.key}" title="CLI'nin kendi girişini de sil">Çıkış yap</button>`:`<button class="pri" data-act="pconn" data-k="${x.key}" title="CLI'nin kendi girişi açılır; onayı tarayıcıda verirsin">Bağlan</button>`;
+  const note=x=>x.key==='claude'?'<small class="stl">ana CLI · onay kutusu bağlı · üstteki CLI düğmesiyle kesilir</small>':x.login?`<small class="stl">${esc(x.login.text)}</small>`:!x.installed?`<small class="stl">Kurmak için terminalde: <code style="word-break:break-all">${esc(INST[x.key])}</code></small>`:'';
+  const rows=P.map(x=>{const[c,t]=st(x),b=btns(x),inp=x.key!=='claude'&&x.installed?`<input data-pmodel="${x.key}" placeholder="model (boş = varsayılan)" value="${esc(x.model||'')}" title="model (boş = varsayılan)">`:'';
+    return`<div class="prv" title="${esc(x.src||'')}"><div class="prv-h"><b>${esc(x.label)}</b><span class="lp ${c}" style="white-space:nowrap">${esc(t)}</span></div>${note(x)}${inp||b?`<div class="prv-c">${inp}${b}</div>`:''}${x.key==='antigravity'&&x.installed?`<label class="stl prv-t" title="Komut çalıştırma izinlerini de sormadan verir (yine sandbox içinde). Kapalıyken sadece dosya düzenleyebilir, komutlar reddedilir."><input type="checkbox" data-ptrust ${x.trust?'checked':''}> tam yetki</label>`:''}</div>`}).join('');
   const cats=Object.entries(RT),keys=P.map(x=>x.key);
   const tbl=`<table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:6px"><tr><th style="text-align:left">İş türü</th>${P.map(x=>`<th>${esc(x.label.replace(/ CLI| Code/,''))}</th>`).join('')}</tr>${cats.map(([c,v])=>{const use=keys.filter(k=>P.find(x=>x.key===k).usable),best=use.sort((a,b)=>v.est[b].mean-v.est[a].mean)[0];
-    return`<tr><td title="${esc(v.label)}">${esc(v.label)}</td>${keys.map(k=>{const e=v.est[k];return`<td style="text-align:center;${k===best?'font-weight:700;color:var(--ok)':''}" title="ön bilgi ${e.prior}/10 · ${e.n} görev${e.fails?' · '+e.fails+' hata':''}">${e.mean.toFixed(1)}<small class="stl"> ${e.n?'('+(+e.n.toFixed(1))+')':'·'}</small></td>`}).join('')}</tr>`}).join('')}</table>`;
+    return`<tr><td title="${esc(v.label)}">${esc(v.label)}</td>${keys.map(k=>{const e=v.est[k];return`<td style="text-align:center;white-space:nowrap;${k===best?'font-weight:700;color:var(--ok)':''}" title="ön bilgi ${e.prior}/10 · ${e.n} görev${e.fails?' · '+e.fails+' hata':''}">${e.mean.toFixed(1)}<small class="stl"> ${e.n?'('+(+e.n.toFixed(1))+')':'·'}</small></td>`}).join('')}</tr>`}).join('')}</table>`;
   return`<div class="card" style="overflow:hidden;overflow-wrap:anywhere"><div class="ch">CLI sağlayıcıları<span class="sp"></span><button class="ib ghost" data-act="provreset" title="Öğrenilenleri sıfırla">⟲</button></div>${rows}
     <div class="lbl2">Kim neyde iyi (tahmini puan /10 · parantezde gerçek görev sayısı · kalın = şu an seçilecek)</div>${tbl}
     <details class="sv-m"><summary>Nasıl öğreniyor?</summary><p>Her görev bir iş türüne ayrılır. Ajanın CLI'si "Otomatik" ise o türde en yüksek tahmine sahip CLI seçilir; az denenmiş bir CLI'ye ara sıra (%10) şans verilir. Tahmin = dış kaynaklardan gelen ön bilgi (3 görev ağırlığında) + senin projelerindeki ölçülebilir puanlar (teslimat, denetçi kalitesi, verimlilik) + Bitir'de verdiğin puan (yarım ağırlık). Başka bir CLI hata verirse 1 puan sayılır ve görev Claude Code ile yeniden denenir.</p>
@@ -683,9 +762,10 @@ function renderAnalytics(){
   const cells=Array.from({length:91},(_,i)=>{const d=new Date(start);d.setDate(start.getDate()+i);const v=daily[dkey(d)],lv=!v?0:Math.min(4,1+Math.floor(v.runs/mx*3.99));return`<i class="hm l${lv}${d>today?' fut':''}" title="${dkey(d)}: ${v?fmt(v.tin+v.tout)+' token':'—'}"></i>`}).join('');
   const m={};for(const r of R){m[r.agent]=(m[r.agent]||0)+r.tin+r.tout}const ag=Object.entries(m).sort((a,b)=>b[1]-a[1]),top=Math.max(1,...ag.map(x=>x[1]));
   const bars=ag.map(([k,t])=>`<div class="bar"><span style="color:${who(k).color}">${esc(ROLE[k]||who(k).name)}</span><div class="bb"><i style="width:${t/top*100}%;background:${who(k).color}"></i></div><small>${fmt(t)}</small></div>`).join('');
-  const par=ST.settings?.parallel||ST.parallel;
+  const par=ST.settings?.parallel||ST.parallel;const rev=[0,1,2].includes(ST.settings?.review)?ST.settings.review:2;
   $('#anal').innerHTML=limitHtml()+providersHtml()+savingsHtml()+`<div class="bigs">${big(fmt(tot),'toplam token')}${big(fmt(p.spent||0)+(p.budget?'<small> / '+fmt(p.budget)+'</small>':''),'bu proje')}${big(fmt(R.reduce((a,r)=>a+(r.tcache||0),0)),'önbellekten')}</div>
   <div class="card"><div class="row"><span>Aynı anda ajan</span><span class="sp"></span>${[1,2,3].map(n=>`<button data-act="par" data-n="${n}" class="seg${par==n?' pri':''}">${n}</button>`).join('')}</div>
+  <div class="row"><span title="Ürün projelerinde: gözden geçirenler (tasarımcı, denetçi, bağlıysa Codex/Antigravity) ekran görüntülerine bakar, yapımcı süzüp uygular; tur sayısı kadar tekrarlanır. İçerik projelerinde: ekip toplantısı. Kalite artar, token harcaması da artar.">Ekip içi inceleme</span><span class="sp"></span>${[[0,'Kapalı'],[1,'1 tur'],[2,'2 tur']].map(([n,t])=>`<button data-act="rev" data-n="${n}" class="seg${rev===n?' pri':''}">${t}</button>`).join('')}</div>
   <div class="row"><span title="Bu proje bu kadar token harcayınca durur; 5 saatlik limitini tek projenin bitirmesini önler">Token sınırı</span><span class="sp"></span><input id="bud" type="number" min="0" step="10000" placeholder="sınırsız" value="${p.budget||''}"><button data-act="setbud">Kaydet</button></div></div>
   ${ag.length?`<div class="lbl2">Ajanlar</div>${bars}`:''}
   <div class="lbl2">Son 13 hafta</div><div class="hmw">${cells}</div>`;
@@ -785,7 +865,7 @@ es.onmessage=ev=>{const {type,data}=JSON.parse(ev.data);if(!ST)return;
   else if(type==='state'){ST=data;renderAll()}
   else if(type==='approval'){(ST.approvals||(ST.approvals=[])).push(data);renderApprovals();renderRoster();notify('İzin bekleniyor — '+(ROLE[data.agent]||who(data.agent).name),String(data.text).split('\n').join(' '),'ask')}
   else if(type==='approval_done'){ST.approvals=(ST.approvals||[]).filter(a=>a.id!==data.id);for(const p of ST.projects)for(const m of p.messages)if(m.approvalId===data.id)m.approval=data.decision==='allow'?'allowed':'denied';renderApprovals();renderChat()}
-  else if(type==='project'){const i=ST.projects.findIndex(x=>x.id===data.id);if(i>=0){const {procs,...d}=data;const o=prevP[d.id]||{};ST.projects[i]=d;if(d.id===cur){renderChat();renderTop();renderTab()}
+  else if(type==='project'){const i=ST.projects.findIndex(x=>x.id===data.id);if(i>=0){const {procs,...d}=data;const o=prevP[d.id]||{};ST.projects[i]=d;if(d.id===cur){renderChat();renderTop();renderTab();const dn=x=>(x.board||[]).filter(t=>t.status==='bitti').length;if($('#pv').classList.contains('on')&&(dn(d)!==dn(o)||d.verify?.ts!==o.verify?.ts))loadPv()}
     if(o.executing&&!d.executing)notify('İş tamamlandı',d.name,'done');
     if(d.pendingPlan&&o.plan!==d.pendingPlan.id)notify('Plan onayını bekliyor',d.name,'plan');
     prevP[d.id]={executing:!!d.executing,plan:d.pendingPlan?.id}}}
