@@ -5,7 +5,7 @@
 # LIVAND Ofis
 
 **Yapay zekâ ajanlarından oluşan bir ekibi 3B sanal ofiste yönet.**<br>
-Sen projeyi anlatırsın → CEO plan çıkarır → sen onaylarsın → ekip senin klasöründe çalışır.
+Sen projeyi anlatırsın → ekip lideri plan çıkarır → sen onaylarsın → ekip senin klasöründe çalışır.
 
 ![Node](https://img.shields.io/badge/Node.js-20%2B-3c873a?logo=node.js&logoColor=white)
 ![Electron](https://img.shields.io/badge/Electron-masa%C3%BCst%C3%BC-47848f?logo=electron&logoColor=white)
@@ -20,7 +20,8 @@ Sen projeyi anlatırsın → CEO plan çıkarır → sen onaylarsın → ekip se
 
 ## Neden LIVAND?
 - **API anahtarı yok, sadece CLI:** Ajanlar bilgisayarındaki **Claude Code**, **Codex** ve **Antigravity** komut satırı araçlarıyla, kendi aboneliğinle çalışır. Hesap bilgilerin uygulamadan geçmez; ortamda bir API anahtarı olsa bile CLI'lere aktarılmaz.
-- **Her işe en iyi CLI:** Görevler iş türüne ayrılır (kod, terminal, arayüz, araştırma, metin, denetim, plan). "Otomatik" ajanlar o işte en iyi sonucu veren bağlı CLI'yi seçer ve projelerdeki puanlarla zamanla öğrenir.
+- **3 ajan, esnek roller:** Ofisin ajanları CLI'lerin kendisidir: **Claude**, **Codex**, **Antigravity**. Tasarımcı, yazılımcı, araştırmacı, yazar, denetçi ayrı ajan değil, ajanın o işte taktığı **şapka**dır; ekip lideri her göreve işe en uygun ajanı atar ve zamanla "kim neyde iyi"yi öğrenir.
+- **Birden çok ofis:** Her ofisin kendi lideri, üyeleri ve projeleri vardır; ofisler aynı anda çalışabilir. Bir ajan kendi içinde alt ajan açınca masasının yanında **stajyer** olarak belirir.
 - **Gelişen ekip:** Her ajanın mesleki standartları, seviyesi, gelişim alanı ve kanıta dayalı dersleri var. Her görevden sonra ölçülebilir puan alır ve öğrendiklerini sonraki işlerde kullanır.
 - **Güvenli çalışma:** Ajanlar yalnızca seçtiğin proje klasöründe serbesttir. Klasör dışı erişim, silme ve paket kurulumu gibi riskli işlemler onay kutusuna düşer; paket kurulumunda paket güvenliği gösterilir.
 - **Görünür süreç:** Canlı görev panosu, adım adım günlük, token analizi ve tasarruf hesabı.
@@ -70,20 +71,29 @@ Ya da `Ofis.cmd` dosyasına çift tıkla. Sadece sunucu için `npm start` → ht
 1. Üstteki **CLI** düğmesi yeşilse Claude Code hazırdır.
 2. **Analiz → CLI sağlayıcıları** kartında Codex ve Antigravity için **Bağlan**'a bas, onayı tarayıcıda ver.
 3. **+** ile yeni proje aç, çalışılacak klasörü seç ve projeni anlat (veya hazır bir şablon seç).
-4. CEO'nun planını onayla; ekip çalışmaya başlar.
+4. Ekip liderinin planını onayla; ekip çalışmaya başlar.
 
 ## CLI bağlantısı
 Üst çubuğun solundaki **CLI** düğmesi Claude Code bağlantısını gösterir: yeşil = bağlı, kırmızı "BAĞLI DEĞİL" = Claude Code yok veya giriş yapılmamış (tıklayınca yeniden denetler), gri **Bağlan** = bağlantıyı sen kestin.
 - Bağlıyken tıkla → onay sorar → **Bağlantıyı kes**: çalışan tüm CLI süreçleri hemen sonlandırılır, bekleyen onaylar reddedilir, yarım görevler "iptal" olur; bağlantı kesikken hiçbir ajan çalışmaz. Tercih kaydedilir, uygulama yeniden açılınca da kesik kalır.
 - **Bağlan**'a basınca giriş durumu yeniden denetlenir; yarım kalan proje "Devam et" ile kaldığı yerden sürer.
 
+## Ofisler, ajanlar ve şapkalar
+- **Ajan = CLI.** Ofiste en fazla 3 masa vardır: Claude, Codex ve Antigravity (yalnızca ofise üye olanlar). Ajana tıklayınca görünen adı, (Claude için) modeli, seviyesi ve son değerlendirmeleri görünür.
+- **Şapka = görev rolü.** Ekip lideri, tasarımcı, yazılımcı, araştırmacı, yazar, denetçi (ve senin eklediklerin). Her şapkanın yönergesi, araçları, becerileri ve dersleri vardır; şapkayı hangi ajan takarsa o işte bunlar istemine girer. Roster'daki **Şapkalar** düğmesinden düzenlenir; bir şapkaya "tercih edilen ajan" verebilirsin.
+- **Ekip lideri:** Her ofisin lideri (varsayılan Claude) planı çıkarır ve her göreve bir ajan atar ("kim neyde iyi" tablosunu ipucu olarak görür). Atanmayan görevi ofis, şapka tercihine ya da tabloya göre bir üyeye verir. Lider masası ön sıradadır, etiketinde **LİDER** yazar; çalışan ajanın etiketinde o an taktığı şapka görünür.
+- **Ofisler:** Üst çubuktaki ofis seçiciden ofis değiştirilir; ⚙ ile ad, lider ve üyeler düzenlenir, **+ Yeni ofis** ile yenisi açılır. Projeler bir ofise bağlıdır; bir ofis silinirse projeleri silinmez, ilk ofise taşınır. Ofisler aynı anda çalışabilir; her CLI'nin eşzamanlı iş sınırı Analiz'deki **paralel** ayarıdır (CLI başına, varsayılan 2), fazlası sıraya girer.
+- **Stajyerler:** Bir ajan kendi içinde alt ajan açtığında (Claude Code'un Agent/Task aracı) masasının yanında küçük bir **stajyer** belirir, roster'da "1 stajyer" yazar, iş bitince kaybolur.
+- **Ortak klasör:** Üç ajan da projenin aynı çalışma klasöründe çalışır; gözden geçirirken dosyaları kendileri açıp okur (isteme gömülmüş özet değil).
+- **Eski sürümden geçiş:** İlk açılışta eski rol ajanları (CEO, tasarımcı…) dersleri, becerileri ve yönergeleriyle şapkaya dönüşür; mevcut projeler "Ana ofis"e bağlanır; "kim neyde iyi" tablosu korunur.
+
 ## Çoklu CLI: Claude Code, Codex, Antigravity
 Ajanlar Claude Code'un yanında **OpenAI Codex CLI** (`codex exec --json`) ve **Google Antigravity CLI** (`agy -p --output-format stream-json`) ile de çalışabilir.
 - **Bağlan:** **Analiz → CLI sağlayıcıları** kartında **Bağlan**'a bas. Codex tarayıcıda OpenAI giriş sayfasını açar. Antigravity önce Antigravity IDE'deki Google girişini sessizce dener (`agy models`, token harcamaz); giriş yoksa ayrı bir pencere açar ve tarayıcıda Google girişi istenir. Onayı web'de sen verirsin; parola ya da anahtar bu uygulamadan geçmez. Tarayıcı açılmazsa kartta **Onay sayfasını aç** düğmesi çıkar.
 - **Bağlantıyı kes:** O CLI'ye yeni iş verilmez ve çalışan süreçleri hemen durur; yarım kalan görev Claude Code ile sürer. **Çıkış yap**, CLI'nin bu bilgisayardaki girişini de siler.
 - Model alanı boşsa CLI'nin kendi varsayılan modeli kullanılır.
-- **Ajan başına seçim:** Varsayılan **Otomatik**'tir: sistem her görevi o işte en iyi olan bağlı CLI'ye verir. İstersen ajana tıklayıp sabit bir CLI seçebilirsin.
-- **Kim neyde iyi?** Otomatik ajan, görevin iş türünde en yüksek tahmine sahip CLI'yi seçer; az denenmiş bir CLI'ye ara sıra (%10) şans verir.
+- **Görev ataması:** Ekip lideri her göreve bir ajan atar; atanmamışsa şapkanın sabit tercihi, o da yoksa "kim neyde iyi" tablosu (yalnızca ofis üyeleri arasından) seçer.
+- **Kim neyde iyi?** Görevin iş türünde en yüksek tahmine sahip ajan seçilir; az denenmiş bir ajana ara sıra (%10) şans verilir.
 - **Tahmin nereden gelir?** Başlangıçta kamuya açık kıyaslardan gelen hafif bir ön bilgi (Claude: gerçek depo hatası düzeltme/SWE-bench; Codex: terminal görevleri/Terminal-Bench; Antigravity/Gemini: web arayüzü ve Google aramalı araştırma); bu bilgi sadece 3 görev ağırlığındadır. Sonra projelerindeki ölçülebilir puanlar (teslimat, denetçi kalitesi, verimlilik) ve Bitir'de verdiğin puan (yarım ağırlık) eklendikçe tablo senin kullanımına göre değişir. Tablo kartta görünür; ⟲ ile sıfırlanır.
 - **Hata olursa:** Codex/Antigravity bir görevde hata verirse bu 1 puan sayılır ve görev Claude Code ile bir kez daha denenir.
 - **Güvenlik farkı:** Codex ve Antigravity ofisin onay kutusuna bağlanamaz (Claude Code'daki `--permission-prompt-tool` karşılığı yok). Bu yüzden kendi sandbox'larında, çalışma klasörüyle sınırlı ve onay sormadan çalışırlar: Codex `--sandbox workspace-write` (ağ kapalı, bu yüzden web araştırmasına atanmaz), planlamada `read-only`; Antigravity `--sandbox --mode accept-edits` (dosya düzenleyebilir; komut çalıştırma sadece "tam yetki" açıksa). Paket kurma veya klasör dışı erişim gerektiren riskli işlerde ajanı Claude Code'da tut.
@@ -93,9 +103,9 @@ Ajanlar Claude Code'un yanında **OpenAI Codex CLI** (`codex exec --json`) ve **
 **Analiz** sekmesinin en üstünde oturum (5 saatlik) ve haftalık kullanım yüzdesi, çubuk ve yenilenme zamanı görünür. Değerler Claude Code'un kendi `/usage` komutundan (`claude -p /usage`) okunur; bu komut model çağırmaz, **token harcamaz**. Açılışta, her çalıştırma bitince ve 10 dakikada bir kendiliğinden tazelenir; ↻ ile elle yenilenir. Üstteki CLI düğmesi oturum yüzdesini gösterir (örn. "CLI %48"); limit dolarsa "Limit doldu" olur. Kimlik bilgisi dosyalarına erişilmez.
 
 ## Akış
-1. Yeni proje → klasör seç (veya varsayılan) → projeyi anlat ya da hazır şablon seç.
-2. CEO kısa araştırma yapıp görev planı çıkarır; planı onaylarsın (veya değişiklik istersin).
-3. Ajanlar (tasarımcı, geliştirici, araştırmacı, yazar, denetçi + senin eklediklerin) görevleri sırayla/paralel yapar; riskli her işlem onay kutusuna düşer.
+1. Ofisi seç → yeni proje → klasör seç (veya varsayılan) → projeyi anlat ya da hazır şablon seç.
+2. Ekip lideri kısa araştırma yapıp görev planı çıkarır; her göreve bir ajan ve bir şapka atar; planı onaylarsın (veya değişiklik istersin).
+3. Ajanlar görevleri sırayla/paralel yapar; riskli her işlem onay kutusuna düşer.
 4. Bitirince puan verirsin; ajanlar dersler çıkarır ve sonraki projelerde kullanır.
 
 ## Panel sekmeleri
@@ -105,28 +115,28 @@ Ajanlar Claude Code'un yanında **OpenAI Codex CLI** (`codex exec --json`) ve **
 - **Analiz**: Claude limiti, CLI sağlayıcıları ve "kim neyde iyi" tablosu, tasarruf, toplam/proje/ajan bazında token, son 13 haftanın ısı haritası, proje başına token bütçesi.
 
 ## Ajanların gelişimi
-Her ajanın **mesleki standartları** ve **teslim öncesi kontrol listesi** vardır (CEO, tasarımcı, geliştirici, araştırmacı, yazar, denetçi; eklenen ajanlar genel bir yönerge alır). Her görevde istemine şunlar eklenir: standartları, seviyesi, **gelişim alanı** (son görevlerdeki en zayıf ölçütü) ve en güçlü 6 dersi.
+Gelişim iki katmanlıdır: **ajanın** (CLI) seviyesi ve puanları, **şapkanın** mesleki standartları, gelişim alanı ve dersleri. Her şapkanın **mesleki standartları** ve **teslim öncesi kontrol listesi** vardır; o şapkayla yapılan her görevde istemine standartları, **gelişim alanı** (son görevlerdeki en zayıf ölçütü) ve en güçlü 6 dersi eklenir. Böylece bir ders (ör. yazarlıkta öğrenilen) şapkayı hangi ajan takarsa onunla gelir.
 - **Dersler kendiliğinden oluşur:** Görevden sonra ölçülebilir puandan (eksik dosya, çok adım, reddedilen işlem, gereksiz soru) ve denetçinin notundan token harcamadan ders çıkar; ajan da her işin sonunda tek cümlelik **öz değerlendirme** yazar. Projeyi bitirince senin puanından çıkan dersler en yüksek ağırlığı alır.
 - Benzer dersler birleşip güçlenir, eskiler zamanla zayıflar (30 günde yarılanır); en fazla 24 ders tutulur.
-- **Seviye:** Stajyer → Yardımcı → Uzman → Kıdemli → Usta. Deneyim her görevin puanı kadar artar; ortalama kalite düşükse seviye sınırlanır. Seviye atlayınca ajan sohbette haber verir.
-- Ajana tıklayınca seviye, ilerleme, gelişim alanı, güçlü yönler, standartlar ve dersler (kaynağıyla) görünür; istemediğin dersi silebilirsin.
+- **Seviye (ajanın):** Çırak → Yardımcı → Uzman → Kıdemli → Usta. Deneyim her görevin puanı kadar artar; ortalama kalite düşükse seviye sınırlanır. Seviye atlayınca ajan sohbette haber verir.
+- Ajana tıklayınca seviyesi ve son değerlendirmeleri; **Şapkalar**'dan bir şapkaya tıklayınca gelişim alanı, standartlar ve dersler (kaynağıyla) görünür; istemediğin dersi silebilirsin.
 
 ## Ajan becerileri
-Her rolün gerçek meslek yöntemlerinden oluşan becerileri vardır; her beceri **adımlar** ve **"bitti sayılması için" ölçütlerinden** oluşur (`lib/skills.mjs`).
+Her şapkanın gerçek meslek yöntemlerinden oluşan becerileri vardır; her beceri **adımlar** ve **"bitti sayılması için" ölçütlerinden** oluşur (`lib/skills.mjs`).
 - **Tasarımcı:** tasarım sistemi, erişilebilir tasarım (WCAG AA), duyarlı yerleşim, kullanıcı akışı, marka kimliği.
 - **Yazılımcı:** semantik HTML, duyarlı CSS, erişilebilir kod, form doğrulama, temiz JavaScript, çalıştır ve doğrula, performans ve teknik SEO.
 - **Araştırmacı:** kaynak doğrulama, rakip analizi, hedef kitle, yerel işletme görünürlüğü.
 - **Yazar:** dönüşüm odaklı metin, SEO uyumlu metin, marka sesi, arayüz metinleri, blog yazısı.
 - **Denetçi:** teslim kontrolü, web sitesi denetimi, erişilebilirlik denetimi, kod incelemesi, içerik denetimi.
-- **CEO:** kapsam netleştirme, paralel planlama.
+- **Ekip lideri:** kapsam netleştirme, paralel planlama.
 
-Her görevde görev metnine en uyan **en fazla 3 beceri** istem içine girer (az token); üç CLI de aynı şekilde kullanır. Panoda her adımda hangi becerilerin uygulandığı görünür. Ajan kartındaki **Becerileri** bölümünden beceri açıp kapatabilir, adımlarını görebilir ve **kendi becerini** ekleyebilirsin (ad, tetikleyen kelimeler, adımlar; kelime boşsa her görevde uygulanır). Senin eklediğin beceri, uyduğunda hazır becerilerin önüne geçer. Eklenen ajanlar becerilerini seçtikleri yetenek şablonundan alır.
+Her görevde görev metnine en uyan **en fazla 3 beceri** istem içine girer (az token); üç CLI de aynı şekilde kullanır. Panoda her adımda hangi becerilerin uygulandığı görünür. Şapka kartındaki **Becerileri** bölümünden beceri açıp kapatabilir, adımlarını görebilir ve **kendi becerini** ekleyebilirsin (ad, tetikleyen kelimeler, adımlar; kelime boşsa her görevde uygulanır). Senin eklediğin beceri, uyduğunda hazır becerilerin önüne geçer. **Kendi şapkan** (Şapkalar → + Kendi şapkan) becerilerini seçtiğin yetenek şablonundan alır.
 
 ## Ürün modu: tek yapımcı ↔ gözden geçirenler
 Araştırmalar (Cognition, [Multi-Agents: What's Actually Working](https://cognition.com/blog/multi-agents-working), 2026; [Don't Build Multi-Agents](https://cognition.com/blog/dont-build-multi-agents); Anthropic, [multi-agent research system](https://www.anthropic.com/engineering/multi-agent-research-system); MetaGPT) aynı sonuca varıyor: aynı ürüne **paralel yazan** ajanlar birbirinin örtük kararlarını göremez ve tutarsız sonuç üretir (ör. kuş ve arka plan farklı tarzda); işe yarayan, **yazmanın tek elden** yapılması ve diğer ajanların girdi, gözden geçirme ve öneriyle zekâ katmasıdır. Ofis site/uygulama/oyun gibi ürünlerde bu modelle çalışır:
-1. **Girdiler (paralel):** Araştırmacı, yazar ve tasarımcı yapımcıya belge hazırlar (bulgular, sayfa metinleri, tasarım yönü). CEO vizyona **tarz** (yaratıcı yön) ve **yapı** (sayfa/ekran bölümleri) yazar.
-2. **Tek yapımcı:** Yazılımcı ürünü **tasarım dahil** baştan sona yazar. Girdileri özet değil **tam metin** olarak alır, tasarım becerileri de ona verilir, daha çok adım hakkı vardır. Örtük kararlarını (palet, yazı tipi, yerleşim, dosya yapısı) "---KARARLAR---" altında açıkça yazar; kararlar sohbete ve gözden geçirenlere gider. **Görerek çalışır:** Claude Code'da çalışırken `screenshot` aracı vardır (ofisin MCP sunucusu, onay sormaz); ilk taslaktan ve her büyük görsel değişiklikten sonra sayfasının tam sayfa ekran görüntüsüne bakıp düzeltir (yaz → bak → düzelt). Codex/Antigravity'de bu araç yoktur.
-3. **Gözden geçirme (temiz bağlam, yazmaz):** Tasarımcı ekran görüntülerine bakıp görseli, denetçi kabul ölçütlerini ve hataları, yazar (girdi verdiyse) metni inceler; **Codex/Antigravity bağlıysa ikinci görüş** olarak katılır. Kesin kontrol hataları ve tarayıcı sorunları da bulguya eklenir.
+1. **Girdiler (paralel):** Araştırmacı, yazar ve tasarımcı şapkalı ajanlar yapımcıya belge hazırlar (bulgular, sayfa metinleri, tasarım yönü). Ekip lideri vizyona **tarz** (yaratıcı yön) ve **yapı** (sayfa/ekran bölümleri) yazar.
+2. **Tek yapımcı:** Yazılımcı şapkasını takan tek ajan ürünü **tasarım dahil** baştan sona yazar. Girdileri özet değil **tam metin** olarak alır, tasarım becerileri de ona verilir, daha çok adım hakkı vardır. Örtük kararlarını (palet, yazı tipi, yerleşim, dosya yapısı) "---KARARLAR---" altında açıkça yazar; kararlar sohbete ve gözden geçirenlere gider. **Görerek çalışır:** ofisin MCP sunucusundaki `screenshot` aracıyla (onay sormaz) ilk taslaktan ve her büyük görsel değişiklikten sonra sayfasının tam sayfa ekran görüntüsüne bakıp düzeltir (yaz → bak → düzelt). Araç Claude Code'a ve Codex'e (her çalıştırmada `-c mcp_servers…` ile; `~/.codex` ayarın değişmez) verilir; Antigravity'de yoktur.
+3. **Gözden geçirme (temiz bağlam, yazmaz):** Denetim (kabul ölçütleri, hatalar, kod sağlamlığı) ve tasarım incelemesi (ekran görüntüleri) **yapımcıdan farklı ajanlara** verilir: farklı model kendi işini övmez. Örneğin Claude yazarsa Codex denetler, Antigravity tasarıma bakar; ofiste tek ajan varsa aynı ajan temiz bağlamla bakar. Kesin kontrol hataları ve tarayıcı sorunları da bulguya eklenir.
 4. **Triyaj (tartışma):** Yapımcı her bulguya kullanıcının isteği ve vizyona göre "uygulandı" ya da "reddedildi — gerekçe" der ve kabul ettiklerini kendisi uygular (sohbette görünür). Sonraki turda gözden geçirenler reddedilenleri gerekçesiyle görür, ikna olmazlarsa tekrar eder. Ciddi bulgu kalmayınca biter; Analiz → Ekip içi inceleme ile tur sayısı (varsayılan 2) değişir.
 Ürün işi olmayan projeler (araştırma, blog, içerik) ekip toplantısı akışıyla yürür. Yapımcının düzeltmeleri ilk yapımla aynı CLI'de çalışır.
 
@@ -136,7 +146,7 @@ Araştırmalar (Cognition, [Multi-Agents: What's Actually Working](https://cogni
 
 ## Proje yönetimi: kabul ölçütleri → sözleşme → uygulama → doğrulama
 Ekip, MetaGPT/ChatDev'deki gibi aşamalı ve belgeye dayalı çalışır; iş, ölçülebilir ölçütler karşılanana kadar bitmiş sayılmaz.
-1. **Kabul ölçütleri:** CEO planla birlikte 3-8 gözlemlenebilir ölçüt yazar (K1, K2…) ve her görevi karşılaması gereken ölçütlere bağlar. Ajan kendi ölçütlerini istemde görür ve teslimden önce kontrol eder.
+1. **Kabul ölçütleri:** Ekip lideri planla birlikte 3-8 gözlemlenebilir ölçüt yazar (K1, K2…) ve her görevi karşılaması gereken ölçütlere bağlar. Ajan kendi ölçütlerini istemde görür ve teslimden önce kontrol eder.
 2. **Sözleşme:** Birden çok kişinin aynı ürüne katkı verdiği işlerde ilk görev ortak bir sözleşme belgesidir (dosya yapısı, adlar, tokenlar, veri biçimleri); diğerleri ona göre paralel çalışır.
 3. **Otomatik doğrulama (token harcamaz):** Kırık sayfa içi bağlantı, bulunamayan dosya (görsel, betik, stil, atlas), JS/JSON sözdizimi, yer tutucu metin, eksik viewport/başlık/alt metni kodla bulunur. Giriş sayfası varsa gizli bir Electron penceresinde açılır; ağın boşalması, web fontları ve görseller beklendikten sonra **masaüstü ve mobil tam sayfa ekran görüntüsü** alınır (sayfa ekran yüksekliğinde dilimlerle kaydırılarak çekilir, görünüm başına en fazla 6 dilim; kaydırınca beliren bölümler de tetiklenir), konsol hataları ve yatay taşma yakalanır. Dış ağda yalnızca font/CDN/görsel sunucularından (Google Fonts, cdnjs, jsDelivr, unpkg, Unsplash…) GET isteğine izin verilir; diğerleri engellenir ve hata değil uyarı olarak raporlanır. Doğrulama denetimden önce, ekip toplantısından önce ve en sonda çalışır.
 4. **Denetim:** Denetçi kesin kontrol sonuçlarını ve ekran görüntülerini görür, her kabul ölçütünü "geçti/kaldı" diye kanıtıyla işaretler. Kalan ölçütler ve kesin kontrol hataları ekip toplantısının gündemine, ilgili dosyanın sorumlusuna atanarak girer.
@@ -149,20 +159,20 @@ Ekip, MetaGPT/ChatDev'deki gibi aşamalı ve belgeye dayalı çalışır; iş, �
 **Düzeltmelerde bağlam:** Düzeltme ve akran önerisi turlarında ajan kendi önceki raporunu görür; dosyaları baştan keşfetmez (token tasarrufu). Claude Code oturumlarını sürdürmek (resume) bilinçli olarak kullanılmaz: oturum kayıtlarını kullanıcının ev klasörüne yazar.
 
 ## Yetenekler ve proje türleri
-CEO planlarken ofisin **yetenek kataloğunu** görür ve görevlere yetenek atar (plan kartında ve panoda rozet olarak görünür). Atanan yeteneğin kullanım talimatı o görevin istemine girer; gerekiyorsa göreve ek araç (ör. Bash) açılır. CEO hiç yetenek atamazsa (ya da şablon kullanılırsa) görev metnine göre otomatik tamamlanır.
+Ekip lideri planlarken ofisin **yetenek kataloğunu** görür ve görevlere yetenek atar (plan kartında ve panoda rozet olarak görünür). Atanan yeteneğin kullanım talimatı o görevin istemine girer; gerekiyorsa göreve ek araç (ör. Bash) açılır. ekip lideri hiç yetenek atamazsa (ya da şablon kullanılırsa) görev metnine göre otomatik tamamlanır.
 - **Görsel/asset hattı** (tasarımcı, yazılımcı): `tools/assets.mjs` — bağımlılıksız PNG aracı. `pixel` (piksel sanatı JSON → PNG, animasyon kareleri → şerit), `nobg` (arka planı saydam yap; kenardan dolgu, karakterin içi korunur), `trim`, `split --auto|--grid` (sprite sheet'i assetlere böl + manifest), `pack` (atlas.png + atlas.json), `scale`, `info`. Bu araç çalışma klasörü içinde ve zincirleme komut olmadan **onay beklemeden** çalışır.
 - **Vektör çizim (SVG)**: logo, ikon, karakter, katmanlı arka plan.
 - **Çalıştırıp doğrulama** (yazılımcı): sözdizimi ve test komutları.
 
 > Ofis fotoğraf gerçekliğinde resim **üretemez** (CLI'ler görsel üretmez); görseller piksel sanat ya da SVG olarak üretilir. Senin verdiğin PNG'ler (ör. bir sprite sheet) çalışma klasörüne konursa arka planı kaldırılıp assetlere bölünebilir.
 
-**Proje türü rehberleri:** İstek bir türe uyuyorsa (oyun, web sitesi, web uygulaması) CEO'ya önerilen iş akışı verilir. Örneğin oyunda: tasarım belgesi + asset listesi ve atlas sözleşmesi → assetler ile oyun kodu **paralel** → oynanabilirlik denetimi. Oyun için ayrıca beceriler var: oyun tasarım belgesi, oyun asseti üretimi, oyun geliştirme (Canvas), oyun denetimi.
+**Proje türü rehberleri:** İstek bir türe uyuyorsa (oyun, web sitesi, web uygulaması) ekip liderine önerilen iş akışı verilir. Örneğin oyunda: tasarım belgesi + asset listesi ve atlas sözleşmesi → assetler ile oyun kodu **paralel** → oynanabilirlik denetimi. Oyun için ayrıca beceriler var: oyun tasarım belgesi, oyun asseti üretimi, oyun geliştirme (Canvas), oyun denetimi.
 
 ## Ekip içi inceleme
-- **Ortak ürün vizyonu:** CEO projeyi yalnızca ön yüz olarak değil, bütün bir ürün olarak planlar (araştırma, içerik, tasarım, teknik, yayına alma, kalite) ve planla birlikte **amaç, kitle, başarı ölçütü ve kapsamı** yazar. Vizyon plan kartında görünür ve her ajanın istemine girer.
+- **Ortak ürün vizyonu:** Ekip lideri projeyi yalnızca ön yüz olarak değil, bütün bir ürün olarak planlar (araştırma, içerik, tasarım, teknik, yayına alma, kalite) ve planla birlikte **amaç, kitle, başarı ölçütü ve kapsamı** yazar. Vizyon plan kartında görünür ve her ajanın istemine girer.
 - **Paralel çalışma:** Her görev kendi önkoşulları biter bitmez başlar; aynı anda çalışan ajanlar birbirinin dosyalarına yazmaz.
 - **Akran incelemesi:** Bir görev bitince, o çıktının üzerine çalışacak ajan dosyaları okuyup somut öneri verir; öneri varsa sahibi bir kez uygular.
-- **Ekip toplantısı:** İlk sürüm bitince herkes ürünün **bütününü** okuyup değerlendirir: ✓ olmuş, ✗ olmamış, → olabilir (her madde bir sorumluya atanır). Eleştiri alan ajan her maddeye "katılıyorum / kısmen / katılmıyorum" diye gerekçesiyle yanıt verir. CEO tartışmayı tartıp kararları ve reddedilen önerileri açıklar. Denetçinin bulguları da gündeme girer. Toplantı sohbette ayrı renkte, panoda aşamalarıyla (değerlendirme → tartışma → karar) görünür.
+- **Ekip toplantısı:** İlk sürüm bitince herkes ürünün **bütününü** okuyup değerlendirir: ✓ olmuş, ✗ olmamış, → olabilir (her madde bir sorumluya atanır). Eleştiri alan ajan her maddeye "katılıyorum / kısmen / katılmıyorum" diye gerekçesiyle yanıt verir. Ekip lideri tartışmayı tartıp kararları ve reddedilen önerileri açıklar. Denetçinin bulguları da gündeme girer. Toplantı sohbette ayrı renkte, panoda aşamalarıyla (değerlendirme → tartışma → karar) görünür.
 - **Kararlar → düzeltme → yeniden denetim:** Kararlar ilgili ajanlara paralel düzeltme görevi olarak gider, ardından denetçi tekrar bakar. Düzeltmeler ayrı puanlanmaz; yeniden denetimin kalite notu asıl göreve yansır.
 - **Analiz → Ekip içi inceleme:** Kapalı / 1 tur (varsayılan) / 2 tur. Tur arttıkça kalite ve token harcaması artar.
 
@@ -188,7 +198,7 @@ Kullanıcı puanı (Bitir) ayrıca eklenir. Ölçüt hesaplanamıyorsa ağırlı
 | Yazar | 26 | Ölçülmüş — [Noy & Zhang 2023, Science 381:187](https://doi.org/10.1126/science.adh2586): meslek yazısı görevleri; yapay zekâ süreyi %40 kısalttı, kaliteyi %18 artırdı. 26 dk ek dosyadaki ortalamadır. |
 | Araştırmacı | 60 | Varsayım (doğrulanmış ölçüm yok) |
 | Tasarımcı | 90 | Varsayım |
-| CEO | 30 | Varsayım |
+| Ekip lideri | 30 | Varsayım |
 | Denetçi | 30 | Varsayım |
 
 Varsayımları kartın "Yöntem ve kaynaklar" bölümünden kendi iş sürelerinle değiştirebilirsin. Görev türleri çalışmalardaki görevlerle birebir aynı değildir; sonuç bir tahmindir.
@@ -235,8 +245,8 @@ curl -X POST http://localhost:3000/api/event -H "content-type: application/json"
 
 ## Diğer özellikler
 - Bildirim: izin/plan/iş bitti/hata/limit olaylarında kısa ses ve (pencere arka plandaysa) masaüstü bildirimi. Üstteki çan ile kapatılır.
-- Ajan ekleme/silme: ekip panelinde "+ Ajan"; masa ve karakter otomatik oluşur (en fazla 9 ajan).
-- Şablonlar: yeni projede hazır plan seçilirse CEO araştırması atlanır (token harcanmaz).
+- Kendi şapkan: Şapkalar → "+ Kendi şapkan" ile yeni bir görev rolü ekle; ekip lideri planda kullanabilir. Ofise yeni ajan eklenmez: ajanlar bağlı CLI'lerdir (en fazla 3).
+- Şablonlar: yeni projede hazır plan seçilirse ekip liderinin araştırması atlanır (token harcanmaz).
 - Hafıza: ortak tercihler (tüm ajanlar uyar), proje notları ve her ajanın kendi dersleri; proje bitirilince otomatik öğrenilir.
 - Kamera: sürükle = kaydır, tekerlek/pinch = yakınlaş, rol etiketine tıkla = odaklan (çift tıkla = ayarlar), boşluğa çift tıkla = sıfırla.
 - Kalite: sol alttaki düğme (Düşük/Yüksek); düşükte ağaç, gölge ve ışık azalır. Grafik bağlamı kaybolur veya çok yavaşlarsa otomatik düşük kaliteye geçer.

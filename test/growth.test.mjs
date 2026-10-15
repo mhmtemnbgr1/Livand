@@ -14,7 +14,7 @@ test('her varsayılan ajanın mesleki yönergesi var', () => {
 });
 
 test('seviye: deneyimle yükselir, düşük kalite seviyeyi sınırlar', () => {
-  assert.equal(levelOf({ scores: [] }).name, 'Stajyer');
+  assert.equal(levelOf({ scores: [] }).name, 'Çırak');
   const good = { scores: Array.from({ length: 30 }, () => sc(9, {})) };
   assert.equal(levelOf(good).name, 'Kıdemli');   // 270 deneyim
   const weak = { scores: Array.from({ length: 30 }, () => sc(5, {})) };
@@ -77,7 +77,7 @@ test('istem bölümü: standartlar, seviye, gelişim alanı ve dersler içerir',
   const a = { scores: [sc(8, { teslimat: 100, verimlilik: 40 })] };
   addLesson(a, 'Kullanıcı tablolu özet istiyor', 'kullanici');
   const p = growthPrompt('writer', a);
-  assert.match(p, /MESLEKİ STANDARTLARIN \(İçerik yazarı\)/); assert.match(p, /SEVİYEN: Stajyer/); assert.match(p, /Gelişim alanın/); assert.match(p, /tablolu özet/); assert.match(p, /---ÖZ---/);
+  assert.match(p, /MESLEKİ STANDARTLARIN \(İçerik yazarı\)/); assert.match(p, /SEVİYEN: Çırak/); assert.match(p, /Gelişim alanın/); assert.match(p, /tablolu özet/); assert.match(p, /---ÖZ---/);
   assert.ok(!growthPrompt('writer', a, { work: false }).includes('---ÖZ---'), 'plan aşamasında öz değerlendirme istenmez');
 });
 

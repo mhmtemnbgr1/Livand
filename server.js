@@ -462,6 +462,13 @@ function mockRun({ system, prompt }) {
   return { text, tin: Math.ceil((system.length + prompt.length) / 4), tout: Math.ceil(text.length / 4), tcache: 0, demo: true, turns: 2 + Math.floor(Math.random() * 5), subtype: 'success' };
 }
 
+// test modu: gerçek CLI yerine bekler; iş aşamasında bir stajyer (alt ajan) açıp kapatır ki ofiste görünsün
+async function demoWait(prov, phase) {
+  const ms = Number(process.env.OFIS_DEMO_MS) || 3500 + Math.random() * 2500, id = phase === 'work' ? 'demo-' + uid() : null;
+  if (id) emit('sub', { agent: prov, id, on: true, text: 'Dosyaları tarıyor' });
+  await new Promise(r => setTimeout(r, ms));
+  if (id) emit('sub', { agent: prov, id, on: false });
+}
 // araç çağrısını kullanıcının anlayacağı kısa cümleye çevirir ("WebSearch: x" yerine "Web'de aradı: x")
 function activityText(name, input = {}) {
   const base = f => String(f || '').split(/[\\/]/).filter(Boolean).pop() || '';
@@ -633,7 +640,7 @@ async function ask(p, agentId, prompt, { purpose = 'görev', phase = 'text', mod
   const fullSystem = system + skillsPrompt(sk);
   const t0 = Date.now(); status(prov, 'working', purpose, agentId);
   const demo = FORCE_DEMO;
-  const res = await gate(prov, async () => demo ? (await new Promise(r => setTimeout(r, Number(process.env.OFIS_DEMO_MS) || 3500 + Math.random() * 2500)), mockRun({ system: fullSystem, prompt }))
+  const res = await gate(prov, async () => demo ? (await demoWait(prov, phase), mockRun({ system: fullSystem, prompt }))
     : prov === 'claude' ? runClaude({ agentId: prov, p, prompt, system: fullSystem, cwd: dir, think: phase !== 'text' && a.think !== false, ...cfg })
     : runOther(prov, { agentId: prov, p, prompt, system: fullSystem, phase, cwd: dir, think: a.think !== false }));
   if (prov !== 'claude') cfg.model = prov + (safeModel(S.settings.providers[prov]?.model) ? ':' + S.settings.providers[prov].model : '');
@@ -991,7 +998,7 @@ async function teamMeeting(p, done, round) {
   const out = {}; for (const d of dec.kararlar) if (ok(d.sahip) && (out[d.sahip] ||= []).length < 4) out[d.sahip].push(d.is);
   for (const k of Object.keys(out)) if (!out[k].length) delete out[k];
   const n = Object.values(out).reduce((a, l) => a + l.length, 0);
-  post(p, 'ceo', 'all', (dec.ozet ? dec.ozet + '\n\n' : '') + (n ? 'Kararlar:\n' + Object.entries(out).map(([k, l]) => l.map(x => `• ${S.hats[k].name} (${roleName(k)}): ${x}`).join('\n')).join('\n') : 'Değişiklik kararı çıkmadı.') +
+  post(p, 'ceo', 'all', (dec.ozet ? dec.ozet + '\n\n' : '') + (n ? 'Kararlar:\n' + Object.entries(out).map(([k, l]) => l.map(x => `• ${S.agents[cliOf(p, k)]?.name || k} (${roleName(k)}): ${x}`).join('\n')).join('\n') : 'Değişiklik kararı çıkmadı.') +
     (dec.reddedilen.length ? '\n\nReddedilenler:\n' + dec.reddedilen.map(x => `• ${x.no ? x.no + '. madde' : 'Madde'}: ${x.neden}`).join('\n') : ''), { reqId: r.id, meet: 1 });
   bt.meeting = { items: agenda.length, decisions: n, rejected: dec.reddedilen.length };
   close('bitti', `${agenda.length} madde konuşuldu, ${n} karar alındı${dec.reddedilen.length ? `, ${dec.reddedilen.length} öneri reddedildi` : ''}.`);
@@ -1146,7 +1153,7 @@ async function executePlan(p, { resume = false } = {}) {
       p.participants = [...new Set([...(p.participants || []), ...ds.map(d => d.agent)])];
       const files = listFiles(wsDir(p)), cr = p.criteria || [], acc = p.acceptance || {}, passN = cr.filter(c => acc[c.id]?.durum === 'gecti').length;
       const accText = cr.length ? `\n\nKabul ölçütleri: ${passN}/${cr.length} karşılandı` + (cr.some(c => acc[c.id]?.durum !== 'gecti') ? '\n' + cr.filter(c => acc[c.id]?.durum !== 'gecti').map(c => `• ${c.id} ${acc[c.id] ? 'karşılanmadı' : 'denetlenmedi'}: ${c.olcut}${acc[c.id]?.not ? ' — ' + acc[c.id].not : ''}`).join('\n') : '') : '';
-      post(p, 'ceo', 'user', `${main.length} görev tamamlandı.\n` + main.map(d => `• ${S.hats[d.agent].name}: ${cut(d.summary, 160)}`).join('\n') +
+      post(p, 'ceo', 'user', `${main.length} görev tamamlandı.\n` + main.map(d => `• ${S.agents[d.metrics?.provider || cliOf(p, d.agent)]?.name || d.agent} · ${roleName(d.agent)}: ${cut(d.summary, 160)}`).join('\n') +
         (p.loop ? `\n\nYapımcı ↔ gözden geçirme: ${p.loop.tur} tur, ${p.loop.bulgu} bulgu, ${p.loop.uygulandi} uygulandı, ${p.loop.reddedildi} gerekçeyle reddedildi.` : '') +
         (revs.length || meets.length ? `\n\nEkip içi kalite: ${revs.length} akran incelemesi (${applied} tanesinde öneriler uygulandı)${meets.length ? `, ${meets.length} ekip toplantısı (${decN} karar uygulandı${rejN ? `, ${rejN} öneri reddedildi` : ''})` : ''}.` : '') +
         accText + `\n\nOtomatik doğrulama: ${fin.checks.errors} hata, ${fin.checks.warnings} uyarı${fin.visual ? `, tarayıcıda ${fin.visual.errors.length} sorun` : ''}.` + (files.length ? `\n\nÇıktı dosyaları (${files.length}):\n` + files.slice(0, 20).map(x => '• ' + x).join('\n') : ''));

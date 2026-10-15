@@ -19,11 +19,11 @@ const deskGroups = {};
 const SLOT_USER = [2.5, 3.2], SLOT_CEO = [6.5, 3.2];
 const SLOTS = [[2.5, 6.6], [6.5, 6.6], [10.5, 6.6], [2.5, 10.0], [6.5, 10.0], [10.5, 10.0], [2.5, 13.4], [6.5, 13.4], [10.5, 13.4]];
 function slotFor(id) {
-  if (id === 'user') return SLOT_USER; if (id === 'ceo') return SLOT_CEO;
-  const used = new Set(Object.entries(DESKS).filter(([k]) => k !== 'user' && k !== 'ceo').map(([, v]) => v.join()));
+  if (id === 'user') return SLOT_USER; if (id === ST?.lead) return SLOT_CEO;
+  const used = new Set(Object.entries(DESKS).filter(([k]) => k !== 'user' && k !== ST?.lead).map(([, v]) => v.join()));
   return SLOTS.find(s => !used.has(s.join())) || SLOTS[SLOTS.length - 1];
 }
-const KNOWN_MODEL = { user: 'male-a', ceo: 'female-a', designer: 'female-c', developer: 'male-b', researcher: 'male-d', writer: 'female-e', auditor: 'male-f' };
+const KNOWN_MODEL = { user: 'male-a', claude: 'female-a', codex: 'male-b', antigravity: 'female-c' };   // ajan = CLI
 const EXTRA_MODELS = ['female-b', 'male-c', 'female-d', 'male-e', 'female-f'];
 const modelOf = {};
 function modelFor(id) {
@@ -31,17 +31,14 @@ function modelFor(id) {
   if (KNOWN_MODEL[id]) return (modelOf[id] = KNOWN_MODEL[id]);
   const used = new Set(Object.values(modelOf)); return (modelOf[id] = EXTRA_MODELS.find(m => !used.has(m)) || EXTRA_MODELS[Object.keys(modelOf).length % EXTRA_MODELS.length]);
 }
-const KNOWN_ROLE = { user: 'BOSS', ceo: 'CEO', designer: 'DESIGNER', developer: 'DEVELOPER', researcher: 'RESEARCHER', writer: 'WRITER', auditor: 'AUDITOR' };
-const roleOf = id => KNOWN_ROLE[id] || String(ST?.agents?.[id]?.title || id).toUpperCase();
+// etiket: ajanın adı + o an taktığı şapka (ya da LİDER); arayüz roleText ile verir
+const roleOf = id => id === 'user' ? 'BOSS' : ST?.roleText?.(id) || String(ST?.agents?.[id]?.name || id).toUpperCase();
 // masaya özel eşyalar: [model, x, z, {ry, k}]  (masa yerel koordinatı)
 const PROPS = {
   user: [['speakerSmall', -0.58, -0.05], ['plantSmall2', 0.62, -0.1]],
-  ceo: [['laptop', -0.5, 0.12], ['lampSquareTable', 0.66, -0.2], ['plantSmall3', 0.62, 0.14]],
-  designer: [['lampRoundTable', -0.62, -0.18], ['plantSmall2', 0.66, -0.12], ['books', -0.42, 0.16]],
-  developer: [['computerScreen', -0.5, -0.12, { ry: 0.35, k: 0.78 }], ['laptop', 0.62, 0.12], ['computerMouse', 0.5, 0.2]],
-  researcher: [['books', -0.58, -0.05], ['laptop', 0.55, 0.12], ['plantSmall3', 0.68, -0.2]],
-  writer: [['books', -0.6, 0.0], ['lampRoundTable', 0.66, -0.18], ['plantSmall2', 0.45, 0.2]],
-  auditor: [['books', -0.58, 0.1], ['lampSquareTable', 0.66, -0.2], ['computerMouse', 0.45, 0.2]],
+  claude: [['laptop', -0.5, 0.12], ['lampSquareTable', 0.66, -0.2], ['plantSmall3', 0.62, 0.14]],
+  codex: [['computerScreen', -0.5, -0.12, { ry: 0.35, k: 0.78 }], ['laptop', 0.62, 0.12], ['computerMouse', 0.5, 0.2]],
+  antigravity: [['lampRoundTable', -0.62, -0.18], ['plantSmall2', 0.66, -0.12], ['books', -0.42, 0.16]],
 };
 const GENERIC_PROPS = [['books', -0.58, 0.0], ['lampRoundTable', 0.66, -0.18], ['plantSmall3', 0.5, 0.2]];
 const ids = () => Object.keys(DESKS);
@@ -247,8 +244,10 @@ function removeDesk(id) {
   if (chars[id]?.root) scene.remove(chars[id].root);
   delete chars[id]; delete modelOf[id]; delete DESKS[id]; tags[id]?.remove(); delete tags[id]; rebuildNav();
 }
+let lastLead = null;
 function syncAgents() {
   if (!ready || !ST) return;
+  if (ST.lead !== lastLead) { if (lastLead !== null) for (const id of ids()) if (id !== 'user' && !pendingDesk.has(id)) removeDesk(id); lastLead = ST.lead; }
   const want = ['user', ...Object.keys(ST.agents)];
   for (const id of want) if (!DESKS[id] && !pendingDesk.has(id)) addDesk(id);
   for (const id of ids()) if (!want.includes(id) && !pendingDesk.has(id)) removeDesk(id);
@@ -380,7 +379,7 @@ function update(dt, now) {
   }
 }
 
-// ---- yardımcı (alt ajan) karakterleri: Agent aracı kullanılınca masanın yanında belirir ----
+// ---- stajyerler (alt ajanlar): bir ajan kendi içinde alt ajan açınca masasının yanında belirir ----
 const helpers = {};
 async function addHelper(agent, id, text) {
   if (helpers[id] || !DESKS[agent]) return; const n = Object.keys(helpers).length;
@@ -392,7 +391,7 @@ async function addHelper(agent, id, text) {
   const root = new THREE.Group(); root.add(obj); const d = DESKS[agent]; root.position.set(d[0] + (d[0] < 3 ? 1.5 : -1.5), 0, d[1] - 0.7 - n * 0.5); root.rotation.y = d[0] < 3 ? -1.2 : 1.2; scene.add(root);
   const mixer = new THREE.AnimationMixer(obj), clip = gltf.animations.find(a => a.name === 'idle') || gltf.animations[0]; if (clip) mixer.clipAction(clip).play();
   Object.assign(h, { root, mixer });
-  const el = document.createElement('div'); el.className = 'otag'; el.innerHTML = '<div class="ob" style="display:block"></div><div class="on"></div>'; el.firstChild.textContent = text || 'Yardımcı'; el.lastChild.textContent = 'YARDIMCI'; el.style.setProperty('--c', '#9aa4c7'); wrap.appendChild(el); h.el = el;
+  const el = document.createElement('div'); el.className = 'otag'; el.innerHTML = '<div class="ob" style="display:block"></div><div class="on"></div>'; el.firstChild.textContent = text || 'Stajyer'; el.lastChild.textContent = 'STAJYER · ' + String(ST?.agents?.[agent]?.name || agent).toUpperCase(); el.style.setProperty('--c', '#9aa4c7'); wrap.appendChild(el); h.el = el;
 }
 function removeHelper(id) { const h = helpers[id]; if (!h) return; if (h.root) scene.remove(h.root); h.el?.remove(); delete helpers[id]; }
 
@@ -625,11 +624,11 @@ const Office = {
     if (!ST || m.from === m.to || m.to === 'all') return;
     const f = chars[m.from]; if (!f || !DESKS[m.to] || m.handoff || m.score) return;   // özet ve puan mesajları için yürümeye gerek yok
     if (m.from === 'user') {
-      f.bubble = { text: 'İstek', kind: 'say' }; f.wait = 2.2; f.faceTo = 'ceo';
-      const t = chars.ceo; if (t && DESKS.ceo) { const su = seatOf('ceo'); t.listenUntil = performance.now() + 4000; t.listenFace = Math.atan2(DESKS.user[0] - su[0], DESKS.user[1] - su[1]); }
+      const L = ST.lead; f.bubble = { text: 'İstek', kind: 'say' }; f.wait = 2.2; f.faceTo = L;
+      const t = chars[L]; if (t && DESKS[L]) { const su = seatOf(L); t.listenUntil = performance.now() + 4000; t.listenFace = Math.atan2(DESKS.user[0] - su[0], DESKS.user[1] - su[1]); }
       return;
     }
-    if (f.q.length < 3) f.q.push({ to: m.to, text: /^Soru:/.test(m.text) ? 'Soru?' : m.from === 'ceo' ? 'Görev' : m.to === 'ceo' ? 'Teslim' : 'Cevap' });
+    if (f.q.length < 3) f.q.push({ to: m.to, text: /^Soru:/.test(m.text) ? 'Soru?' : m.from === ST.lead ? 'Görev' : m.to === ST.lead ? 'Teslim' : 'Cevap' });
     // iş/soru alan ajan yerinde dönüp dinler (uyuyorsa uyanır)
     if (m.to !== 'user' && chars[m.to]) {
       const t = chars[m.to], sp = visitOf(m.to, m.from), se = seatOf(m.to);
