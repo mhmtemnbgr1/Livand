@@ -148,11 +148,26 @@ Araştırmalar (Cognition, [Multi-Agents: What's Actually Working](https://cogni
 
 > İpucu: Ürünün kalitesinin tavanı yapımcının modelidir. Yazılımcıyı (ajan kartından) en güçlü modele almak en büyük farkı yaratır.
 
+## Özgün tasarım: jenerik "yapay zekâ sitesi" görünümüne karşı
+Yönlendirilmeyen model, eğitim verisindeki en yaygın ve en "güvenli" tasarıma yakınsar: Inter fontu, mor gradyan, birbirinin aynısı kartlar ([Anthropic, Improving frontend design through skills](https://claude.com/blog/improving-frontend-design-through-skills)). Ofis buna dört katmanla karşı koyar ([anthropics/skills frontend-design](https://github.com/anthropics/skills), [impeccable](https://github.com/pbakaus/impeccable), [ui-ux-pro-max](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill) ve [SuperDesign](https://github.com/superdesigndev/superdesign) yaklaşımlarından):
+1. **Estetik kurallar ve yasaklar listesi** (`lib/design.mjs`): Yapımcının istemine konunun kendi dünyasından türetilen görsel yön, işe özel font çifti, adlandırılmış palet, atmosfer ve tek bir hareket anı kuralları girer. Ayrıca açık bir **YAPMA** listesi eklenir: Inter/Roboto, mor/indigo gradyan, gradyanlı metin, aynı kart ızgarası, her bölüme fade-in, emoji ikonlar. Tasarımcı şapkasının **Ayırt edici estetik** becerisi her görevde öne alınır. Tasarım incelemesi de "bu ürün sıradan bir yapay zekâ sitesine benziyor mu?" sorusuna bakar.
+2. **Sektöre göre hazır yönler:** Kafe, perakende, sağlık, finans, teknoloji, eğitim, güzellik, oyun, turizm ve kişisel site için 1-2 denenmiş yön (palet hex değerleriyle, font çifti, yerleşim fikri, kaçınılacaklar) bulunur. Ekip lideri brief'e uyan sektörün yönlerini planlarken görür ve vizyondaki **tarz** alanını bunlardan biriyle ya da daha iyisiyle somut yazar. Tarz alanı 1500 karaktere kadar korunur (eskiden 240'ta kesiliyordu). Tasarımcının `DESIGN.md` belgesi yapımcıya her zaman tam metin gider.
+3. **Kodla jenerik tasarım denetimi (token harcamaz):** Otomatik doğrulama yalnızca yaygın fontlar, mor gradyan, gradyanlı metin, 6+ "card" öğesi, 5+ giriş animasyonu, 4+ emoji ve başlıkta tek kelime vurgusu kalıplarını yakalar. Bunlar panoda ◇ işaretiyle görünür; ürün modunda "orta" önemli bulgu olarak yapımcıya gider, yapımcı kabul eder ya da gerekçesiyle reddeder.
+4. **Yön keşfi** (Analiz → Yön keşfi, varsayılan kapalı): Yapımcı başlamadan önce 3 farklı görsel yönde yalnızca ilk ekran üretilir (`.livand-yonler/`). Ekran görüntüleri alınır, ekip lideri en uygun ve en az jenerik olanı seçer. Yapımcı ürünü bu yönün üzerine kurar. Böylece kötü bir başlangıç yönü cilalanmak yerine en başta elenir. Bir ek çalıştırma kadar token harcar.
+
+**Kullanılabilirlik denetimi (token harcamaz):** Sözdizimi doğru olsa da ziyaretçinin "düğmeler çalışmıyor" diyeceği durumları kodla yakalar:
+- hiçbir yere gitmeyen bağlantılar (`href="#"`, boş; logo hariç) ve hiçbir betiğe bağlanmamış düğmeler,
+- haritayı açmayan "Yol tarifi" düğmeleri ve sayfadaki sokak adresini içermeyen harita bağlantıları,
+- bağlantısız Instagram/telefon/e-posta, sahte numaraya giden arama/WhatsApp düğmeleri (`tel:+905XXXXXXXXX`),
+- ziyaretçiye görünen "yer tutucu" notları ve uzun tek sayfada kaydırınca kaybolan menü.
+
+Bulgular panoda ⚑ ile görünür; ürün modunda "orta" önemli bulgu olarak yapımcıya, ekip modunda toplantı gündemine gider. Yapımcının istemine aynı kurallar baştan eklenir; denetçi her düğmenin tıklanınca gerçek işini yapıp yapmadığına bakar.
+
 ## Proje yönetimi: kabul ölçütleri → sözleşme → uygulama → doğrulama
 Ekip, MetaGPT/ChatDev'deki gibi aşamalı ve belgeye dayalı çalışır; iş, ölçülebilir ölçütler karşılanana kadar bitmiş sayılmaz.
 1. **Kabul ölçütleri:** Ekip lideri planla birlikte 3-8 gözlemlenebilir ölçüt yazar (K1, K2…) ve her görevi karşılaması gereken ölçütlere bağlar. Ajan kendi ölçütlerini istemde görür ve teslimden önce kontrol eder.
 2. **Sözleşme:** Birden çok kişinin aynı ürüne katkı verdiği işlerde ilk görev ortak bir sözleşme belgesidir (dosya yapısı, adlar, tokenlar, veri biçimleri); diğerleri ona göre paralel çalışır.
-3. **Otomatik doğrulama (token harcamaz):** Kırık sayfa içi bağlantı, bulunamayan dosya (görsel, betik, stil, atlas), JS/JSON sözdizimi, yer tutucu metin, eksik viewport/başlık/alt metni kodla bulunur. Giriş sayfası varsa gizli bir Electron penceresinde açılır; ağın boşalması, web fontları ve görseller beklendikten sonra **masaüstü ve mobil tam sayfa ekran görüntüsü** alınır (sayfa ekran yüksekliğinde dilimlerle kaydırılarak çekilir, görünüm başına en fazla 6 dilim; kaydırınca beliren bölümler de tetiklenir), konsol hataları ve yatay taşma yakalanır. Dış ağda yalnızca font/CDN/görsel sunucularından (Google Fonts, cdnjs, jsDelivr, unpkg, Unsplash…) GET isteğine izin verilir; diğerleri engellenir ve hata değil uyarı olarak raporlanır. Doğrulama denetimden önce, ekip toplantısından önce ve en sonda çalışır.
+3. **Otomatik doğrulama (token harcamaz):** Kırık sayfa içi bağlantı, bulunamayan dosya (görsel, betik, stil, atlas), JS/JSON sözdizimi, yer tutucu metin, eksik viewport/başlık/alt metni kodla bulunur. Giriş sayfası varsa gizli bir Electron penceresinde açılır; ağın boşalması, web fontları ve görseller beklendikten sonra **masaüstü ve mobil tam sayfa ekran görüntüsü** alınır (sayfa ekran yüksekliğinde dilimlerle kaydırılarak çekilir, görünüm başına en fazla 6 dilim; kaydırınca beliren bölümler de tetiklenir), konsol hataları ve yatay taşma yakalanır. Ardından **tıklama testi** görünür her düğme ve bağlantıya (görünüm başına en fazla 20) gerçekten tıklar: tıklanınca hiçbir şey olmayan, başka bir öğenin altında kalıp tıklanamayan ve hedefi sayfada olmayan öğeler tarayıcı hatası olarak bildirilir (dış bağlantılar açılmaz, yalnızca hedefi kaydedilir). Dış ağda yalnızca font/CDN/görsel sunucularından (Google Fonts, cdnjs, jsDelivr, unpkg, Unsplash…) GET isteğine izin verilir; diğerleri engellenir ve hata değil uyarı olarak raporlanır. Doğrulama denetimden önce, ekip toplantısından önce ve en sonda çalışır.
 4. **Denetim:** Denetçi kesin kontrol sonuçlarını ve ekran görüntülerini görür, her kabul ölçütünü "geçti/kaldı" diye kanıtıyla işaretler. Kalan ölçütler ve kesin kontrol hataları ekip toplantısının gündemine, ilgili dosyanın sorumlusuna atanarak girer.
 5. **Son rapor:** "Kabul ölçütleri: 5/6 karşılandı", otomatik doğrulama sonucu ve dosyalar. Panoda ölçütlerin durumu, doğrulama ayrıntıları ve ekran görüntüleri görünür.
 
@@ -188,6 +203,8 @@ Puan (1-10) = Teslimat %40 + Kalite %35 + Verimlilik %15 + Uyum %10.
 - **Uyum:** reddedilen izin ve ajanlar arası soru sayısı.
 
 Kullanıcı puanı (Bitir) ayrıca eklenir. Ölçüt hesaplanamıyorsa ağırlıklar kalanlara yeniden dağıtılır.
+
+**Doğrulanmamış iş puanlanmaz:** Bağımsız denetim yapılamadıysa (gözden geçirenler çalışmadı ya da sonuç vermedi) puanlar kaydedilmez; seviye, "kim neyde iyi" tablosu ve dersler etkilenmez, sohbette "DOĞRULANMADI" yazar ve son rapor uyarıyla başlar. Kabul ölçütleri yalnızca bağımsız denetimle "geçti" sayılır; yapımcının "kontrol ettim" demesi yeterli değildir. Bütçe incelemeye yetmiyorsa tasarım incelemesi atlanır, denetim korunur.
 
 ## Tasarruf (yöntem)
 **Analiz → Bu ay tasarruf** kartı şu formülü kullanır:
@@ -263,6 +280,7 @@ Tüm durum (projeler, ajanların dersleri, ayarlar, ofis düzeni, Electron profi
   - `test/policy.test.mjs`: klasör dışı yol tespiti, komut sınıflandırma, paket ayrıştırma ve yazım hatası tuzağı, paket güvenlik kararı, puanlama, klasör doğrulama, şablon tutarlılığı.
   - `test/growth.test.mjs`: dersler, seviye, gelişim alanı, tasarruf hesabı.
   - `test/providers.test.mjs`: iş türü ayrımı, öğrenme/seçim, Codex ve Antigravity çıktı ayrıştırma, güvenli argüman.
+  - `test/design.test.mjs`: jenerik tasarım ve kullanılabilirlik denetimleri, sektör yönleri, estetik becerisinin önceliği.
   - `test/server.test.mjs`: ayrı bir veri klasörüyle gerçek sunucu — Host/Origin koruması, dış olay girişi, düzen, plan→pano→puan→geçmiş akışı, token bütçesi, çökme sonrası kurtarma, çoklu CLI yönlendirme.
 - `npm run shots`: README görsellerini (animasyon dahil) test modunda yeniden üretir.
 - `node tools/make-icon.mjs`: "VL" ikonunu üretir (`public/icon.svg`, `public/icon-256.png`, `electron/icon.ico`).

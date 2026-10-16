@@ -19,7 +19,7 @@ app.disableHardwareAcceleration();
 // sonuç hem stdout'a hem <çıktı>/sonuc.json'a yazılır (Windows'ta Electron'un stdout'u her zaman bağlı olmayabilir)
 const done = r => { const s = JSON.stringify(r); try { fs.mkdirSync(outDir, { recursive: true }); fs.writeFileSync(path.join(outDir, 'sonuc.json'), s); } catch {} try { process.stdout.write(s + '\n'); } catch {} app.exit(0); };
 app.on('window-all-closed', () => {});   // pencereler arasında uygulama kapanmasın
-setTimeout(() => done({ error: 'zaman aşımı' }), 80000).unref?.();
+setTimeout(() => done({ error: 'zaman aşımı' }), 130000).unref?.();
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 const local = u => /^(file|data|blob|devtools|chrome-extension):/i.test(u);
@@ -33,6 +33,44 @@ const SETTLE = `(async () => {
   await Promise.race([Promise.all([...document.images].filter(i => !i.complete).map(i => new Promise(r => { i.onload = i.onerror = r; }))), t(4000)]);
   await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
   return true;
+})()`;
+
+// tıklama testi: görünür her düğme/bağlantıya gerçekten tıklar ve bir şey olup olmadığına bakar (DOM değişikliği, kaydırma,
+// adres, yeni pencere, form gönderimi). Kod okumayla görülemeyen "düğme çalışmıyor" hatalarını yakalar: işlevsiz düğme,
+// başka bir öğenin altında kalıp tıklanamayan düğme, hedefi olmayan sayfa içi bağlantı. Sayfadan çıkılmaz: dış/başka sayfa
+// bağlantılarının tıklaması engellenip yalnızca hedefi kaydedilir.
+const CLICK_TEST = `(async () => {
+  const t = ms => new Promise(r => setTimeout(r, ms)), MAX = 20;
+  document.documentElement.style.scrollBehavior = 'auto';
+  let muts = 0, opened = 0, submitted = 0, navTo = null;
+  new MutationObserver(l => { muts += l.length; }).observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
+  window.open = () => { opened++; return null; };
+  document.addEventListener('submit', e => { submitted++; e.preventDefault(); }, true);
+  document.addEventListener('click', e => { const a = e.target.closest && e.target.closest('a[href]'); if (!a) return; const h = a.getAttribute('href') || ''; if (h.startsWith('#') && !a.target) return; navTo = h; e.preventDefault(); }, true);
+  const vis = el => { const r = el.getBoundingClientRect(), s = getComputedStyle(el); return r.width > 2 && r.height > 2 && s.visibility !== 'hidden' && s.display !== 'none' && +s.opacity > 0.05; };
+  const label = el => (el.innerText || el.getAttribute('aria-label') || el.getAttribute('title') || el.value || el.tagName).trim().replace(/\\s+/g, ' ').slice(0, 40);
+  const els = [...document.querySelectorAll('a[href], button, [role=button], [onclick], input[type=button], input[type=submit], summary')]
+    .filter(el => !el.disabled && vis(el) && !(el.matches('a[href="#"]') && /logo|brand|marka/i.test(el.className))).slice(0, MAX);
+  const dead = [], covered = [], badHash = [];
+  for (const el of els) {
+    if (!el.isConnected || !vis(el)) continue;
+    el.scrollIntoView({ block: 'center' }); await t(60);
+    const r = el.getBoundingClientRect(), top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    if (top && top !== el && !el.contains(top) && !top.contains(el)) { covered.push(label(el) + ' → üstünde: ' + (top.id ? '#' + top.id : top.tagName.toLowerCase() + (top.className && typeof top.className === 'string' ? '.' + top.className.split(' ')[0] : ''))); continue; }
+    const href = el.getAttribute('href');
+    if (href && href.length > 1 && href.startsWith('#') && !document.getElementById(decodeURIComponent(href.slice(1)))) { badHash.push(label(el) + ' (' + href + ')'); continue; }
+    if (location.hash) history.replaceState(null, '', location.pathname + location.search);   // aynı hedefe giden ikinci bağlantı da etkisini göstersin
+    muts = 0; await t(150); const base = muts;
+    const y0 = scrollY, h0 = location.href, o0 = opened, s0 = submitted; navTo = null; muts = 0;
+    try { el.click(); } catch {}
+    await t(350);
+    const acted = muts > base || scrollY !== y0 || (location.href !== h0 && href !== "#") || opened > o0 || submitted > s0 || navTo !== null || document.activeElement !== el && document.activeElement && document.activeElement !== document.body && !el.contains(document.activeElement);
+    if (!acted) dead.push(label(el));
+    if (el.getAttribute('aria-expanded') === 'true') { try { el.click(); } catch {} }   // açılan menüyü kapat; sonraki öğeler örtülmesin
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await t(50);
+  }
+  scrollTo(0, 0);
+  return { tested: els.length, dead, covered, badHash };
 })()`;
 
 app.whenReady().then(async () => {
@@ -82,6 +120,16 @@ app.whenReady().then(async () => {
         const f = path.join(outDir, `${name}-${i + 1}.png`); fs.writeFileSync(f, img.toPNG()); shots.push(f);
       }
       pages[name] = { height: H, tiles: n, truncated: Math.ceil((H - 4) / vh) > n };
+      // tıklama testi ekran görüntülerinden SONRA: tıklamalar sayfayı değiştirebilir
+      win.webContents.on('will-navigate', e => e.preventDefault());
+      win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+      const ct = await Promise.race([js(CLICK_TEST), sleep(25000).then(() => null)]);
+      if (ct) {
+        pages[name].clicks = ct.tested;
+        for (const x of ct.dead) errors.push(`[${name}] tıklanınca hiçbir şey olmuyor: "${x}"`);
+        for (const x of ct.covered) errors.push(`[${name}] tıklanamıyor, başka bir öğenin altında: "${x}"`);
+        for (const x of ct.badHash) errors.push(`[${name}] bağlantının hedefi sayfada yok: "${x}"`);
+      }
       win.destroy();
     }
     if (blocked.size) warnings.push(`Engellenen dış istekler (yalnızca font/CDN/görsel sunucularına izin var): ${[...blocked].slice(0, 6).join(', ')}`);

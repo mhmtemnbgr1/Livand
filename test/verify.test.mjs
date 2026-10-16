@@ -40,7 +40,7 @@ test('kesin kontroller: bozuk site her sorunu yakalar', () => {
 test('kesin kontroller: temiz site sorunsuz', () => {
   const d = site({
     'index.html': '<!doctype html><html><head><meta name="viewport" content="width=device-width"><title>Temiz</title><link rel="stylesheet" href="s.css"></head><body><a href="#a">a</a><section id="a"><img src="i.png" alt="x"></section><a href="https://ornek.com">dış</a><a href="mailto:a@b.co">e</a><script type="module" src="m.js"></script></body></html>',
-    's.css': 'body{margin:0}', 'i.png': 'x', 'm.js': "export const a = 1;\n",
+    's.css': 'body{margin:0;font-family:"Nunito Sans",sans-serif}', 'i.png': 'x', 'm.js': "export const a = 1;\n",
   });
   try { const c = checkWorkspace(d); assert.equal(c.errors, 0, JSON.stringify(c.issues)); assert.equal(c.warnings, 0); assert.equal(checksText(c), ''); }
   finally { fs.rmSync(d, { recursive: true, force: true }); }

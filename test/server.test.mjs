@@ -165,6 +165,24 @@ test('token bütçesi: aşılınca durur, bütçe artınca devam eder', { timeou
   assert.equal(fin.board.filter(t => !t.kind).length, 3);
 });
 
+test('doğrulanmadı: gözden geçirenler inceleyemezse puan kaydedilmez, rapor uyarır', { timeout: 120000 }, async () => {
+  const R = startServer({ OFIS_DEMO_REVIEW: 'kor', OFIS_DEMO_MS: '300' }); await R.ready;
+  try {
+    const p = (await R.api('projects', { name: 'Kör' })).json;
+    await R.api(`projects/${p.id}/message`, { text: 'Kafem için tek sayfalık site' });
+    const get = async () => (await R.api('state')).json.projects.find(x => x.id === p.id);
+    await waitFor(async () => (await get()).pendingPlan, 30000, 300);
+    await R.api(`projects/${p.id}/plan`, { action: 'approve' });
+    const done = await waitFor(async () => { const q = await get(); return q.board?.length && !q.executing && q.board.some(t => t.kind === 'gözden geçirme') && q; }, 100000, 500);
+    assert.equal(done.board.find(t => t.kind === 'gözden geçirme').status, 'hata');
+    assert.ok(!(done.scores || []).some(s => s.from === 'metrik'), 'denetim yoksa metrik puanı kaydedilmez');
+    assert.ok(done.messages.some(m => m.score && /DOĞRULANMADI/.test(m.text)));
+    assert.ok(done.messages.some(m => /^⚠ DOĞRULANMADI/.test(m.text) && /görev tamamlandı/.test(m.text)), 'son rapor uyarıyla başlar');
+    const st = (await R.api('state')).json;
+    assert.ok(!Object.values(st.agents).some(a => (a.scores || []).some(s => s.project === 'Kör')), 'seviye etkilenmez');
+  } finally { await R.stop(); }
+});
+
 test('ekip içi kalite: akran incelemesi öneri verir, denetçi düzeltme turu açar, yeniden denetler', { timeout: 120000 }, async () => {
   const R = startServer({ OFIS_DEMO_REVIEW: 'revize', OFIS_DEMO_MS: '300' }); await R.ready; R.listen();
   try {
@@ -240,6 +258,7 @@ test('oyun projesi: CEO yetenek kataloğunu görür, asset hattını tasarımcı
   const full = (await S.api('requests/' + planReq.id)).json;
   assert.match(full.prompt, /OFİSİN YETENEKLERİ/); assert.match(full.prompt, /PROJE TÜRÜ: Oyun/);
   assert.match(full.prompt, /ÜRÜN MODELİ/, 'CEO tek yapımcı modelini bilir');
+  assert.match(full.prompt, /TASARIM YÖNÜ[\s\S]*Piksel arcade/, 'CEO sektörün hazır tasarım yönlerini görür');
   assert.ok(st0.capabilities.some(c => c.id === 'asset-hatti'), 'arayüze yetenek adları gider');
   // ürün modu: assetler ve kod tek yapımcıda (yazılımcı) birleşir; tasarım belgesi girdi kalır; denetim döngüye devredilir
   assert.equal(pl.mode, 'urun');
@@ -247,6 +266,7 @@ test('oyun projesi: CEO yetenek kataloğunu görür, asset hattını tasarımcı
   assert.equal(bt.agent, 'developer'); assert.deepEqual(bt.needs, ['t1']);
   assert.ok(bt.caps.includes('asset-hatti') && bt.caps.includes('calistir-dogrula'));
   assert.ok(!pl.tasks.some(t => t.agent === 'auditor'));
+  await S.api('settings', { explore: true });   // yön keşfi açık: yapımcıdan önce çalışır
   await S.api(`projects/${p.id}/plan`, { action: 'approve' });
   const done = await waitFor(async () => { const q = await get(); return q.board?.length && !q.executing && q.board.every(t => t.status === 'bitti') && q; }, 100000, 1000);
   const st = (await S.api('state')).json;
@@ -263,6 +283,11 @@ test('oyun projesi: CEO yetenek kataloğunu görür, asset hattını tasarımcı
   assert.equal(g.length, 1); assert.ok(!done.board.some(t => t.kind === 'düzeltme'));
   assert.ok(st.requests.some(r => r.projectId === p.id && r.agent === 'designer' && r.purpose === 'Tasarım incelemesi'));
   assert.ok(done.messages.some(m => /ürün gözden geçirmeden geçti/.test(m.text)));
+  // yön keşfi: test yanıtında yön yok → yapımcı vizyondaki tarzla başlar, akış durmaz
+  const yk = done.board.find(t => t.kind === 'yön keşfi');
+  assert.ok(yk && yk.status === 'bitti' && /üretilemedi/.test(yk.summary), JSON.stringify(yk));
+  assert.match(wfull.prompt, /ESTETİK YÖN[\s\S]*YAPMA/, 'yapımcı estetik kuralları ve yasakları alır');
+  await S.api('settings', { explore: false });
 });
 
 test('proje yönetimi: kabul ölçütleri, kesin kontroller, önizleme güvenliği ve geri alma', { timeout: 150000 }, async () => {
@@ -303,6 +328,11 @@ test('proje yönetimi: kabul ölçütleri, kesin kontroller, önizleme güvenli�
     const page = await fetch(pv.base + 'index.html'); assert.equal(page.status, 200); assert.equal(await page.text(), BROKEN);
     assert.equal((await fetch(`http://127.0.0.1:${pv.port}/${p.id}/..%2f..%2fstate.json`)).status, 403, 'klasör dışına çıkılamaz');
     assert.equal((await fetch(`http://127.0.0.1:${pv.port}/yok/index.html`)).status, 404);
+    fs.mkdirSync(path.join(dir, '.livand-yonler'), { recursive: true }); fs.writeFileSync(path.join(dir, '.livand-yonler', 'yon-1.html'), '<h1>y</h1>');
+    fs.mkdirSync(path.join(dir, '.gizli'), { recursive: true }); fs.writeFileSync(path.join(dir, '.gizli', 'a.txt'), 'x');
+    assert.equal((await fetch(pv.base + '.livand-yonler/yon-1.html')).status, 200, 'yön denemeleri önizlenebilir');
+    assert.equal((await fetch(pv.base + '.gizli/a.txt')).status, 403, 'diğer gizli klasörler sunulmaz');
+    fs.rmSync(path.join(dir, '.livand-yonler'), { recursive: true, force: true }); fs.rmSync(path.join(dir, '.gizli'), { recursive: true, force: true });
     assert.equal(await rawGet(pv.port, `/${p.id}/index.html`, { host: 'evil.example.com' }), 403, 'DNS rebinding');
     assert.equal((await fetch(`http://127.0.0.1:${pv.port}/${p.id}/index.html`, { method: 'POST' })).status, 403);
     const cross = await fetch(R.base + '/api/settings', { method: 'POST', headers: { 'content-type': 'application/json', origin: `http://127.0.0.1:${pv.port}` }, body: '{"review":0}' });

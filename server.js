@@ -10,6 +10,7 @@ import { pickSkills, skillsPrompt, skillsOf, cleanCustomSkill } from './lib/skil
 import { CAPABILITIES, catalogPrompt, capsForTask, capabilityPrompt, capTools } from './lib/capabilities.mjs';
 import { checkWorkspace, checksText, walk } from './lib/checks.mjs';
 import { productize, reviewersFor, findingsOf, decisionsListOf, triageOf, stripSections } from './lib/orchestra.mjs';
+import { aestheticPrompt, presetPrompt, usabilityPrompt, copiedPreset } from './lib/design.mjs';
 import { createRequire } from 'node:module';
 import { growthPrompt, growthPromptEn, migrateAgent, addLesson, metricLessons, extractSelfReview, levelOf, focusOf, charterFor, baselineOf, savingsOf, MIN_ACCEPT } from './lib/growth.mjs';
 import { PROVIDERS, PROVIDER_KEYS, AGENT_PROVIDERS, CATEGORIES, PRIOR_SRC, categoryOf, recordResult, estimate, pickProvider, parseCodexLine, parseAgyLine, newAcc, shellQuote, safeModel, providerFits, cliGuide, mountWorkspaceMcp, restoreAllMounts } from './lib/providers.mjs';
@@ -448,6 +449,7 @@ function mockRun({ system, prompt }) {
   }
   else if (/GERI_BILDIRIM_TRIYAJ/.test(prompt)) { const nos = [...prompt.matchAll(/^(\d+)\. \[/gm)].map(m => +m[1]); text = `Geri bildirimi süzdüm (demo).\n---TRİYAJ---\n${nos.map((n, i) => i === nos.length - 1 && nos.length > 1 ? `${n}: reddedildi — kapsam dışı (demo)` : `${n}: uygulandı — düzelttim (demo)`).join('\n')}\n---ÖZ--- Geri bildirimi daha erken iste\n---ÖZET---\n${name} geri bildirimi uyguladı (demo).`; }
   else if (/YAPIMCI_GOREVI/.test(prompt)) text = `Ürünü baştan sona yazdım (demo).\n---KARARLAR---\n- Palet: lacivert ve turuncu (demo)\n- Yazı tipi: sistem yazı tipleri (demo)\n- Tek sayfa, bölümler anchor ile (demo)\n---ÖZ--- Kararları daha erken yaz\n---ÖZET---\n${name} ürünü yaptı (demo).`;
+  else if (/GOZDEN_GECIRME/.test(prompt) && process.env.OFIS_DEMO_REVIEW === 'kor') text = 'Dosyaları açamadım (demo: inceleyemeyen gözden geçiren).';
   else if (/GOZDEN_GECIRME/.test(prompt)) {
     const first = /\(tur 1\)/.test(prompt), ks = [...prompt.matchAll(/^- (K\d+): /gm)].map(m => m[1]), audit = /"kabul"/.test(prompt);
     const j = { olmus: ['Bütünlüklü görünüyor (demo)'], bulgular: DEMO_REVIEW && first ? [{ onem: 'kritik', konu: 'Başlık hiyerarşisi zayıf (demo)', oneri: 'H1 büyüt (demo)' }, { onem: 'kucuk', konu: 'Boşluklar (demo)', oneri: '8px ızgara (demo)' }] : [] };
@@ -668,7 +670,7 @@ async function ask(p, agentId, prompt, { purpose = 'görev', phase = 'text', mod
   if (prov !== 'claude') cfg.model = prov + (safeModel(S.settings.providers[prov]?.model) ? ':' + S.settings.providers[prov].model : '');
   status(prov, res.error ? (res.limit ? 'limit' : 'error') : 'idle', res.error ? cut(res.error, 60) : '');
   if (res.error) logEv(p, prov, 'error', res.error);
-  const req = { id: uid(), ts: Date.now(), projectId: p?.id, agent: agentId, cli: prov, provider: prov, cat, why: pick.why, model: cfg.model, purpose, phase, skills: sk.map(x => x.name), system: cut(fullSystem, 6000), prompt: cut(prompt, 6000),
+  const req = { id: uid(), ts: Date.now(), projectId: p?.id, agent: agentId, cli: prov, provider: prov, cat, why: pick.why, model: cfg.model, purpose, phase, skills: sk.map(x => x.name), system: cut(fullSystem, 8000), prompt: cut(prompt, 10000),
     userStop: res.userStop || undefined, response: cut(String(res.text || ''), 6000), tin: res.tin, tout: res.tout, tcache: res.tcache || 0, ms: Date.now() - t0, demo: !!res.demo, error: res.error, turns: res.turns, maxTurns: cfg.turns, subtype: res.subtype };
   S.requests.push(req); if (S.requests.length > 300) S.requests.splice(0, S.requests.length - 300);
   const now0 = new Date(), day = now0.getFullYear() + '-' + String(now0.getMonth() + 1).padStart(2, '0') + '-' + String(now0.getDate()).padStart(2, '0'), dd = (S.daily[day] ||= { runs: 0, tin: 0, tout: 0, tcache: 0 });
@@ -785,8 +787,16 @@ async function runTask(p, t, brief, deps, done) {
 }
 
 // Puan = Teslimat %40 + Kalite (denetçi rubriği) %35 + Verimlilik %15 + Uyum %10 (eksik ölçüt varsa ağırlıklar yeniden dağıtılır)
+// bağımsız bir denetim (denetçinin kalite puanı) yapıldı mı? Yapılmadıysa metrik puanları "doğrulanmadı" sayılır:
+// teslimat/verimlilik neredeyse her zaman 100 çıktığı için kalite olmadan puan anlamsız biçimde 10/10 olur (gerçek denemede görüldü)
+const audited = p => Object.keys(p.quality || {}).length > 0;
 function scoreProject(p, done) {
   const lines = [];
+  if (!audited(p)) {
+    const names = [...new Set(Object.values(done).filter(d => d.agent !== 'auditor' && d.metrics && !d.fix).map(d => `${S.agents[d.metrics.provider]?.name || d.agent} · ${roleName(d.agent)}`))];
+    if (names.length) post(p, 'ceo', 'user', `Puan raporu: DOĞRULANMADI. Ürün bağımsız olarak denetlenemedi (denetçi çalışmadı ya da sonuç vermedi), bu yüzden puanlar kaydedilmedi; seviye, "kim neyde iyi" tablosu ve dersler etkilenmedi.\nPuanlanmayanlar: ${names.join(', ')}\nDenetim için "Devam et" ile gözden geçirmeyi yeniden çalıştırabilir ya da Bitir'de kendi puanını verebilirsin.`, { score: 1 });
+    return;
+  }
   for (const d of Object.values(done)) {
     if (d.agent === 'auditor' || !d.metrics || d.fix) continue;   // düzeltme turları ayrı puanlanmaz; kalitesi yeniden denetimle asıl göreve yansır
     const { score, parts, note } = scoreTask(d.metrics, (p.quality || {})[d.agent]);
@@ -807,7 +817,9 @@ function scoreProject(p, done) {
 // ortak ürün vizyonu: CEO planla birlikte yazar, tüm ajanların istemine ve ekip toplantısına girer
 function visionOf(v) {
   if (!v || typeof v !== 'object') return null;
-  const o = Object.fromEntries(['amac', 'kitle', 'basari', 'kapsam', 'tarz', 'yapi'].map(k => [k, cut(String(v[k] || '').trim(), 240)]).filter(([, x]) => x));
+  // tarz ve yapı yapımcının yaratıcı yönergesidir: palet, fontlar, motifler ve bölümler sığsın diye uzun tutulur
+  const max = { tarz: 1500, yapi: 1000 };
+  const o = Object.fromEntries(['amac', 'kitle', 'basari', 'kapsam', 'tarz', 'yapi'].map(k => [k, cut(String(v[k] || '').trim(), max[k] || 240)]).filter(([, x]) => x));
   return Object.keys(o).length ? o : null;
 }
 const VIS_LBL = { amac: 'Amaç', kitle: 'Kitle', basari: 'Başarı ölçütü', kapsam: 'Kapsam', tarz: 'Tarz', yapi: 'Yapı' };
@@ -824,10 +836,10 @@ async function handleUser(p, text, { revise } = {}) {
   const files = listFiles(wsDir(p)); const fctx = files.length ? `\nÇALIŞMA KLASÖRÜNDEKİ DOSYALAR: ${files.slice(0, 25).join(', ')}` : '';
   const planReq = await ask(p, 'ceo', `PLAN_JSON\nKullanıcının proje tanımı/isteği: """${revise ? p.brief : text}"""${revise ? `\nKULLANICININ PLAN HAKKINDAKİ DÜZELTMESİ: """${revise}"""` : ''}${ctx}${fctx}\nŞAPKALAR (görev rolleri, task.agent): ${roster}\nAJANLAR (bu ofisin üyeleri, task.kim — her göreve işe en uygun ajanı ata): ${crew}${catalogPrompt((revise ? p.brief : text) + ' ' + (revise || ''), Object.keys(S.hats))}\n` +
     `Önce gerekiyorsa kısa bir araştırma yap (en fazla 3 web araması), sonra planı çıkar.\n` +
-    `Yanıtın SADECE JSON olsun: {"reply":"kullanıcıya 2-3 cümle: neyi anladın, nasıl ilerleyeceksin","vizyon":{"amac":"ürün kimin hangi sorununu çözecek, 1 cümle","kitle":"birincil kullanıcılar","basari":"bitmiş ve başarılı sayılması için ölçülebilir ölçüt","kapsam":"bu turda var olacaklar / olmayacaklar","tarz":"YARATICI YÖN: ruh hali, renk fikri, tipografi, görsel dil, örnek/benzer referans","yapi":"sayfa/ekran yapısı ve bölümleri sırasıyla"},"kabul":[{"id":"K1","olcut":"gözlemlenebilir, kontrol edilebilir ölçüt"}],"research":["en fazla 5 kısa bulgu"],"tasks":[{"id":"t1","agent":"<şapka anahtarı>","kim":"<ajan anahtarı>","instruction":"net kısa görev","needs":["önceki görev id"],"deliverable":"çıktı dosyası adı","yetenekler":["gerekiyorsa yetenek id"],"kriterler":["bu görevin karşıladığı kabul ölçütü id'leri"]}],"needs_approval":["çalışırken izin isteyebilecek kurulum/indirme/komutlar, varsa"],"questions":["kritik eksik bilgi varsa en fazla 2 soru"]}\n` +
+    `Yanıtın SADECE JSON olsun: {"reply":"kullanıcıya 2-3 cümle: neyi anladın, nasıl ilerleyeceksin","vizyon":{"amac":"ürün kimin hangi sorununu çözecek, 1 cümle","kitle":"birincil kullanıcılar","basari":"bitmiş ve başarılı sayılması için ölçülebilir ölçüt","kapsam":"bu turda var olacaklar / olmayacaklar","tarz":"YARATICI YÖN: ruh hali; adlandırılmış palet (hex); font çifti (Google Fonts adıyla); yerleşim fikri; konunun dünyasından 3 görsel motif; kaçınılacaklar","yapi":"sayfa/ekran yapısı ve bölümleri sırasıyla"},"kabul":[{"id":"K1","olcut":"gözlemlenebilir, kontrol edilebilir ölçüt"}],"research":["en fazla 5 kısa bulgu"],"tasks":[{"id":"t1","agent":"<şapka anahtarı>","kim":"<ajan anahtarı>","instruction":"net kısa görev","needs":["önceki görev id"],"deliverable":"çıktı dosyası adı","yetenekler":["gerekiyorsa yetenek id"],"kriterler":["bu görevin karşıladığı kabul ölçütü id'leri"]}],"needs_approval":["çalışırken izin isteyebilecek kurulum/indirme/komutlar, varsa"],"questions":["kritik eksik bilgi varsa en fazla 2 soru"]}\n` +
     `BÜTÜNCÜL DÜŞÜN: Projeyi sadece ön yüz/görsel iş olarak değil, kullanıcıya değer üreten BÜTÜN bir ürün olarak ele al: amaç ve kitle (araştırma), içerik ve dil (metin), deneyim ve görsel (tasarım), teknik altyapı (kod, veri, çalıştırma ve yayına alma), kalite (denetim). İşin gerektirdiği her uzmanlığı kullan, gerektirmeyeni ekleme. Vizyonu tüm ekip görecek ve ekip sonda ürünü bu vizyona göre birlikte değerlendirecek.\n` +
-    `ÜRÜN MODELİ: Site/uygulama/oyun gibi bir ürünü TEK bir yapımcı (developer şapkasını takan tek ajan) baştan sona yazar — tasarımı da kodla birlikte o yapar. Gözden geçirmeyi ofis, mümkünse yapımcıdan FARKLI bir ajana verir (farklı model kendi işini övmez). Ürünü parçalara bölüp farklı ajanlara yazdırma (paralel yazanlar birbirinin kararlarını göremez, sonuç tutarsız olur). Araştırmacı, yazar ve tasarımcı yapımcıya GİRDİ belgesi hazırlar (.md: bulgular, sayfa metinleri, tasarım yönü); tasarımcı ve denetçi sonra ürünün ekran görüntülerine bakarak gözden geçirir, yapımcı geri bildirimi süzüp uygular. Vizyondaki "tarz" ve "yapi" yapımcının yaratıcı yönergesidir: somut yaz.\n` +
-    `YAŞAM DÖNGÜSÜ: (1) Gereksinim → 3-8 KABUL ÖLÇÜTÜ yaz: her biri gözlemlenebilir ve kontrol edilebilir olsun (ör. "Mobilde menü açılıp kapanıyor", "İletişim formu hatalı e-postayı reddediyor"); belirsiz ifade ("güzel olsun") yazma. (2) Sözleşme → birden fazla kişinin aynı ürüne katkı verdiği işlerde İLK görev ortak bir sözleşme belgesi olsun (dosya yapısı, dosya/sınıf/kare adları, renk-yazı tokenları, veri biçimleri) ve ona dayanan görevler needs ile ona bağlansın. (3) Uygulama → sözleşmeye göre paralel. (4) Doğrulama → denetçi her kabul ölçütünü tek tek kontrol eder; ekip sonra toplanıp düzeltir. Her ölçüt en az bir görevin "kriterler" alanında olsun.\n` +
+    `ÜRÜN MODELİ: Site/uygulama/oyun gibi bir ürünü TEK bir yapımcı (developer şapkasını takan tek ajan) baştan sona yazar — tasarımı da kodla birlikte o yapar. Gözden geçirmeyi ofis, mümkünse yapımcıdan FARKLI bir ajana verir (farklı model kendi işini övmez). Ürünü parçalara bölüp farklı ajanlara yazdırma (paralel yazanlar birbirinin kararlarını göremez, sonuç tutarsız olur). Araştırmacı, yazar ve tasarımcı yapımcıya GİRDİ belgesi hazırlar (.md: bulgular, sayfa metinleri, tasarım yönü); tasarımcı ve denetçi sonra ürünün ekran görüntülerine bakarak gözden geçirir, yapımcı geri bildirimi süzüp uygular. Vizyondaki "tarz" ve "yapi" yapımcının yaratıcı yönergesidir: somut yaz. Tasarımcı görevi varsa çıktısı DESIGN.md olsun (palet, font çifti, ölçek, yerleşim fikri, motifler, kaçınılacaklar); yapımcı onu tam metin alır.${presetPrompt((revise ? p.brief : text) || '')}\n` +
+    `YAŞAM DÖNGÜSÜ: (1) Gereksinim → 3-8 KABUL ÖLÇÜTÜ yaz: her biri gözlemlenebilir ve kontrol edilebilir olsun (ör. "Mobilde menü açılıp kapanıyor", "İletişim formu hatalı e-postayı reddediyor", "Yol tarifi düğmesi haritayı tam adresle açıyor"); belirsiz ifade ("güzel olsun") yazma. Ölçütler DAVRANIŞ ve İÇERİK üzerine olsun: tıklanınca ne olur, ne görünür, mobilde ne olur. Belirli font, renk ya da hex değerini ölçüt yapma (görsel kararlar "tarz"dadır ve yön keşfinde değişebilir). Ana eylem düğmelerinin her birinin gerçek işini yaptığını en az bir ölçüt kapsasın. (2) Sözleşme → birden fazla kişinin aynı ürüne katkı verdiği işlerde İLK görev ortak bir sözleşme belgesi olsun (dosya yapısı, dosya/sınıf/kare adları, renk-yazı tokenları, veri biçimleri) ve ona dayanan görevler needs ile ona bağlansın. (3) Uygulama → sözleşmeye göre paralel. (4) Doğrulama → denetçi her kabul ölçütünü tek tek kontrol eder; ekip sonra toplanıp düzeltir. Her ölçüt en az bir görevin "kriterler" alanında olsun.\n` +
     `Kurallar: en fazla 6 görev. PARALELLİK: needs'e yalnızca o çıktıyı OKUMADAN yapılamayacak önceki görevleri yaz; birbirine gerçekten bağlı olmayan işler (ör. araştırma ile tasarım, metin ile görsel yapı) aynı anda yürüsün diye needs boş olsun. Aynı anda çalışan görevler FARKLI dosyalara yazsın. Her instruction'da ne yapılacağını ve kabul ölçütünü (bitmiş sayılması için ne olmalı) 1-3 cümleyle somut yaz. 2 veya daha fazla görevli işlerde son görev olarak denetçiyi (auditor) ekle; ekip birbirinin çıktısını zaten inceleyip öneri verecek ve denetçinin bulguları ayrıca düzeltilecek, bu yüzden ayrı 'gözden geçir/düzelt' görevi ekleme. Selamlaşma/soru ise tasks boş bırak ve reply'de cevap ver. Kritik bilgi eksikse tasks boş, questions dolu olsun.`,
     { purpose: 'araştırma ve plan', phase: 'plan' });
   let plan; try { plan = JSON.parse(planReq.response.match(/\{[\s\S]*\}/)[0]); } catch { plan = { reply: planReq.response, tasks: [] }; }
@@ -840,6 +852,8 @@ async function handleUser(p, text, { revise } = {}) {
   for (const t of tasks) t.criteria = (Array.isArray(t.kriterler) ? t.kriterler : []).map(x => String(x).toUpperCase()).filter(x => cids.has(x));
   const orch = productize(tasks, S.hats);   // ürün modu: tek yapımcı + girdiler + gözden geçirme döngüsü
   p.pendingPlan = { id: uid(), tasks: orch.tasks, mode: orch.mode, criteria, vision: visionOf(plan.vizyon), research: (plan.research || []).slice(0, 5), needs: (plan.needs_approval || []).filter(Boolean), reply: plan.reply || '', questions: qs };
+  const cp = copiedPreset(p.pendingPlan.vision?.tarz);   // lider hazır yönü aynen aldıysa yapımcı ve yön keşfi bunu bilsin
+  if (cp) { p.pendingPlan.vision.tarz = cut(p.pendingPlan.vision.tarz + `\n(Not: bu, hazır "${cp.ad}" yönünün neredeyse aynısı; projeye özgü ayrıntılarla farklılaştır, aynen uygulama.)`, 1500); logEv(p, 'ceo', 'task', `Tarz hazır "${cp.ad}" yönünün kopyası; yapımcıya farklılaştırma notu eklendi`); }
   post(p, 'ceo', 'user', plan.reply || 'Plan hazır.', { reqId: planReq.id, plan: p.pendingPlan });
   save(); emit('project', p);
 }
@@ -903,7 +917,7 @@ function screenshots(p, tag, page) {
   if (!html || !ELECTRON || (FORCE_DEMO && !process.env.OFIS_SHOTS)) return Promise.resolve(null);
   const out = path.join(SHOTS, p.id, tag); fs.rmSync(out, { recursive: true, force: true });
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
-  return new Promise(resolve => execFile(ELECTRON, [SHOT_TOOL, html, out], { env, windowsHide: true, timeout: 100000 }, () => {
+  return new Promise(resolve => execFile(ELECTRON, [SHOT_TOOL, html, out], { env, windowsHide: true, timeout: 150000 }, () => {
     try { const r = JSON.parse(fs.readFileSync(path.join(out, 'sonuc.json'), 'utf8')); resolve(r.error ? null : { page: path.relative(dir, html).replace(/\\/g, '/'), shots: (r.shots || []).map(x => path.basename(x)), dir: out, errors: r.errors || [], warnings: r.warnings || [], pages: r.pages || {} }); } catch { resolve(null); }
   }));
 }
@@ -929,7 +943,13 @@ async function verifyProject(p, tag) {
   logEv(p, 'auditor', 'task', `Otomatik doğrulama: ${checks.errors} hata, ${checks.warnings} uyarı${visual ? `, tarayıcıda ${visual.errors.length} sorun` : ''}`);
   save(); emit('project', p); return p.verify;
 }
-const verifyText = v => !v ? '' : checksText(v.checks) + (v.visual ? `\nTARAYICI KONTROLÜ (${v.visual.page} gizli tarayıcıda açıldı): ${v.visual.errors.length ? v.visual.errors.map(e => '\n- ' + e).join('') : 'konsol hatası yok, yatay taşma yok.'}\nEKRAN GÖRÜNTÜLERİ (tam sayfa, fontlar yüklü; ${shotPlan(v.visual)}; sırayla Read ile aç ve masaüstü/mobil görünümü baştan sona değerlendir): ${v.visual.shots.map(x => path.join(v.visual.dir, x)).join(' , ')}` : '');
+// perView: görünüm başına verilecek ekran görüntüsü dilimi (0 = hepsi). Her dilim bir görsel okuması demektir; denetim
+// (ölçütler, hatalar, kod) için ilk ekranlar yeter, tam sayfayı tasarım incelemesi okur — token tasarrufu
+const verifyText = (v, perView = 0) => {
+  if (!v) return '';
+  const shots = !v.visual ? [] : perView ? v.visual.shots.filter(x => +(x.match(/-(\d+)\.png$/) || [])[1] <= perView) : v.visual.shots;
+  return checksText(v.checks) + (v.visual ? `\nTARAYICI KONTROLÜ (${v.visual.page} gizli tarayıcıda açıldı, her düğme ve bağlantıya tıklandı): ${v.visual.errors.length ? v.visual.errors.map(e => '\n- ' + e).join('') : 'konsol hatası yok, yatay taşma yok, tıklanan her öğe çalıştı.'}\nEKRAN GÖRÜNTÜLERİ (${perView ? `yalnızca her görünümün ilk ${perView} dilimi; ` : 'tam sayfa, '}fontlar yüklü; ${shotPlan(v.visual)}; sırayla Read ile aç${perView ? '' : ' ve masaüstü/mobil görünümü baştan sona değerlendir'}): ${shots.map(x => path.join(v.visual.dir, x)).join(' , ')}` : '');
+};
 // dosyanın sorumlusu: o dosyayı teslim eden görevin ajanı; yoksa dosya türüne göre
 function ownerOfFile(p, file) {
   const ok = k => S.hats[k] && !['ceo', 'auditor'].includes(k) && !S.hats[k].external;
@@ -959,6 +979,8 @@ async function teamMeeting(p, done, round) {
   }
   const v = await verifyProject(p, `m${round}`);
   for (const x of v.checks.issues.filter(x => x.sev === 'hata').slice(0, 8)) { const o = ownerOfFile(p, x.file); if (o) items.push({ from: 'sistem', sahip: o, tur: 'olmamis', text: `${x.file}: ${x.msg}` }); }
+  for (const x of v.checks.issues.filter(x => x.sev === 'kullanim').slice(0, 4)) { const o = ownerOfFile(p, x.file); if (o) items.push({ from: 'sistem', sahip: o, tur: 'olmamis', text: `${x.file}: ${x.msg}` }); }
+  for (const x of v.checks.issues.filter(x => x.sev === 'tasarim').slice(0, 3)) { const o = ownerOfFile(p, x.file); if (o) items.push({ from: 'sistem', sahip: o, tur: 'olabilir', text: `${x.file}: ${x.msg}` }); }
   if (v.visual) for (const e of v.visual.errors.slice(0, 5)) { const o = ownerOfFile(p, v.visual.page); if (o) items.push({ from: 'sistem', sahip: o, tur: 'olmamis', text: `Tarayıcıda: ${e}` }); }
   const work = Object.values(done).filter(d => !d.fix && d.agent !== 'auditor' && d.agent !== 'ceo');
   const members = round === 1 ? [...new Set(work.map(d => d.agent))].filter(k => S.hats[k] && !S.hats[k].external) : [];
@@ -1043,19 +1065,71 @@ function inputDocs(p, deps) {
 }
 const SHOT_HINT = `"${SELF_SHOT}" aracın varsa onu çağır (sayfayı tam sayfa, fontlar yüklü masaüstü+mobil çeker) ve dönen PNG dilimlerini Read ile açıp gerçekten gör.`;
 function builderPrompt(p, t, deps) {
-  const ins = inputDocs(p, deps), dsk = S.hats.designer ? skillsPrompt(pickSkills('designer', S.hats.designer, `${t.instruction} ${p.brief || ''}`, 2)) : '';
+  let ins = inputDocs(p, deps);
+  const dsk = S.hats.designer ? skillsPrompt(pickSkills('designer', S.hats.designer, `${t.instruction} ${p.brief || ''}`, 3).filter(s => s.id !== 'ayirt-edici-estetik').slice(0, 2)) : '';
+  const dm = path.join(wsDir(p), 'DESIGN.md');   // tasarım belgesi girdilerde yoksa da (ör. önceki turdan) tam metin gelsin
+  if (!/=== DESIGN\.md /i.test(ins) && fs.existsSync(dm)) ins += `\n=== DESIGN.md (tasarım yönü) ===\n${cut(fs.readFileSync(dm, 'utf8'), 6000)}\n`;
+  const dir0 = p.direction ? `\nSEÇİLEN GÖRSEL YÖN (yön keşfinden; ürünün tamamını bu yönde kur, ${p.direction.file} dosyasındaki ilk ekranı başlangıç noktası al ve geliştir). Bu yönün paleti ve fontları, DESIGN.md'deki ve kabul ölçütlerindeki palet/font kararlarının YERİNE GEÇER; çelişki varsa bu yönü uygula (içerik, yapı ve erişilebilirlik kuralları geçerli kalır):\n${p.direction.text}` : '';
   return `\nYAPIMCI_GOREVI: Bu ürünün TEK yazarı sensin; tasarımı da kodla birlikte sen yapıyorsun — usta bir ürün tasarımcısı-geliştirici gibi çalış. Başka kimse ürün dosyalarına yazmayacak; ekip girdi hazırladı ve sonra ekran görüntülerine bakarak gözden geçirecek.` +
     `\n- Önce girdileri ve vizyondaki tarz/yapıyı oku. Görsel yönü (renk paleti, tipografi ölçeği, boşluk, köşe, gölge) CSS değişkenleriyle kur ve ürünün tamamına tutarlı uygula; sıradan şablon görünümünden kaçın, net bir görsel hiyerarşi kur.` +
     `\n- Girdilerdeki gerçek içeriği kullan; yer tutucu bırakma. Mobilde ve masaüstünde düzgün görünsün; etkileşimler çalışsın.` +
-    `\n- GÖREREK ÇALIŞ: ${SHOT_HINT} İlk çalışan taslaktan hemen sonra ve her büyük görsel değişiklikten sonra sayfaya bak; gördüğün sorunları (hiyerarşi, boşluk, hizalama, kontrast, taşma, mobil düzen, boş/kırık bölüm) düzelt ve tekrar bak. Kodu okuyarak "iyi görünüyordur" deme.` +
+    `\n- GÖREREK ÇALIŞ: ${SHOT_HINT} İlk çalışan taslaktan sonra, büyük bir görsel değişiklikten sonra ve teslimden önce sayfaya bak (toplam en fazla 3 çekim; her çekimde yalnızca ilgili dilimleri aç, her görsel token harcar); gördüğün sorunları (hiyerarşi, boşluk, hizalama, kontrast, taşma, mobil düzen, boş/kırık bölüm) düzelt ve tekrar bak. Kodu okuyarak "iyi görünüyordur" deme.` +
     `\n- Bitirmeden önce dosyalarını yeniden aç ve kabul ölçütlerini tek tek kontrol et.` +
     `\n- Yanıtının sonunda (---ÖZ--- satırından önce) "---KARARLAR---" başlığı altında verdiğin örtük kararları madde madde yaz: palet, yazı tipleri, yerleşim, dosya yapısı, önemli etkileşimler. Ekip bunlara göre değerlendirecek.` +
+    aestheticPrompt() + usabilityPrompt() + dir0 +
     (ins ? `\nGİRDİLER (ekibin hazırladığı belgeler, tam metin — özet değil):\n${ins}` : '') + (dsk ? '\n(Tasarım becerileri de senin)' + dsk : '');
 }
+// bir gözden geçirmenin yaklaşık token maliyeti (gerçek denemede denetim 40-55k)
+const REVIEW_COST = 50000;
+
+// ---------- Yön keşfi (Analiz'den açılır) ----------
+// Yapımcı tek bir yöne bağlanınca gözden geçirme yalnızca o yönü cilalar; kötü başlangıç yönü hiç düzelmez (SuperDesign/impeccable varyant fikri).
+// Bu yüzden önce 3 farklı yönde yalnızca ilk ekran üretilir, ekran görüntüleri alınır, ekip lideri en iyisini seçer; yapımcı onun üzerine kurar.
+const EXPLORE_DIR = '.livand-yonler';   // nokta ile başlar: doğrulama, dosya listesi ve giriş sayfası araması bu klasörü görmez
+const exploreOn = () => !!S.settings?.explore;
+async function exploreDirections(p, t, deps) {
+  const hat = S.hats.designer && !S.hats.designer.external ? 'designer' : t.agent, cli = t.cli && provUsable(t.cli) ? t.cli : 'claude';
+  const bt = { id: 'yon', agent: hat, cli, kind: 'yön keşfi', needs: [], deliverable: '', status: 'çalışıyor', startedAt: Date.now(), instruction: 'Yön keşfi: 3 farklı görsel yönde ilk ekran, ekip lideri seçer' };
+  p.board = (p.board || []).filter(x => x.id !== 'yon'); p.board.push(bt); save(); emit('project', p);
+  const end = (summary, status = 'bitti') => { bt.status = status; bt.endedAt = Date.now(); bt.summary = summary; save(); emit('project', p); };
+  post(p, 'ceo', 'all', 'Yön keşfi: yapımcı başlamadan önce 3 farklı görsel yönde ilk ekran deneniyor; en iyisini seçip ürünü onun üzerine kuracağız.', { meet: 1 });
+  fs.rmSync(path.join(wsDir(p), EXPLORE_DIR), { recursive: true, force: true });
+  const ins = inputDocs(p, deps), files = [1, 2, 3].map(i => `${EXPLORE_DIR}/yon-${i}.html`);
+  const r = await ask(p, hat, `YON_KESFI\nBu ürün için birbirinden belirgin biçimde FARKLI 3 görsel yön dene (palet, tipografi ve yerleşim fikri her birinde başka olsun). Her yön için YALNIZCA ilk ekranı (üst menü + hero) tek başına çalışan bir HTML dosyası olarak yaz: ${files.join(', ')} (CSS dosyanın içinde; Google Fonts kullanabilirsin; her dosya en fazla ~150 satır, bu bir eskiz). Gerçek içerik kullan, yer tutucu bırakma. Başka hiçbir dosyaya yazma, ekran görüntüsü alma.\n` +
+    `PROJE TANIMI: ${cut(p.brief || '', 1200)}${visionText(p)}${aestheticPrompt()}${ins ? `\nGİRDİLER:\n${cut(ins, 8000)}` : ''}\n` +
+    `Yanıtının EN SON satırı SADECE şu JSON olsun: {"yonler":[{"dosya":"${files[0]}","ad":"kısa ad","ozet":"palet, fontlar, yerleşim fikri, motifler; 1-2 cümle"}]}`,
+    { purpose: 'yön keşfi', phase: 'work', provider: cli, turns: 30 });
+  const ys = (() => { try { const j = JSON.parse(String(r.response).match(/\{[\s\S]*"yonler"[\s\S]*\}/)[0]); return (j.yonler || []).filter(y => y && files.includes(String(y.dosya || '').replace(/\\/g, '/'))); } catch { return []; } })()
+    .filter(y => fs.existsSync(path.join(wsDir(p), y.dosya))).slice(0, 3);
+  if (r.error || ys.length < 2) { end(r.error ? 'Hata: ' + cut(r.error, 100) : 'Yönler üretilemedi; yapımcı vizyondaki tarzla başlayacak.', r.error ? 'hata' : 'bitti'); return; }
+  const shots = [];
+  for (const [i, y] of ys.entries()) { const v = await screenshots(p, `yon-${i + 1}`, y.dosya); if (v) shots.push(`Yön ${i + 1}: ${v.shots.filter(x => /-1\.png$/.test(x)).map(x => path.join(v.dir, x)).join(' , ')}`); }   // yalnızca ilk ekranlar: yön keşfi zaten yalnızca hero
+  const c = await ask(p, 'ceo', `YON_SECIMI\nYapımcı başlamadan önce ekip 3 farklı görsel yönde ilk ekran denedi. Kullanıcının isteğine, kitleye ve vizyona en iyi hizmet eden, en az jenerik ve en akılda kalıcı olanı seç.\nPROJE TANIMI: ${cut(p.brief || '', 1000)}${visionText(p)}\nYÖNLER:\n` +
+    ys.map((y, i) => `${i + 1}. ${y.ad || 'Yön ' + (i + 1)} (${y.dosya}): ${cut(String(y.ozet || ''), 300)}`).join('\n') +
+    (shots.length ? `\nEKRAN GÖRÜNTÜLERİ (Read ile aç ve gerçekten bak):\n${shots.join('\n')}` : '\n(Ekran görüntüsü alınamadı; dosyaları Read ile oku.)') +
+    `\nYanıtının EN SON satırı SADECE şu JSON olsun: {"secim":<1-${ys.length}>,"neden":"1 cümle","gelistir":"seçilen yönde güçlendirilecek ya da öteki yönlerden alınacak 1-2 somut şey"}`,
+    { purpose: 'yön seçimi', phase: 'plan' });
+  let pick = null; try { pick = JSON.parse(String(c.response).match(/\{[^{}]*"secim"[^{}]*\}/g).pop()); } catch {}
+  const n = Math.min(ys.length, Math.max(1, parseInt(pick?.secim, 10) || 1)), y = ys[n - 1];
+  p.direction = { file: y.dosya, text: cut(`${y.ad || 'Yön ' + n}: ${y.ozet || ''}${pick?.gelistir ? `\nGeliştir: ${pick.gelistir}` : ''}`, 900) };
+  // seçilen yön vizyondaki tarzın yerine geçer: yapımcı ve gözden geçirenler eski palet/fontu (DESIGN.md, kabul ölçütleri) esas almasın
+  if (p.vision) p.vision.tarz = cut(`YÖN KEŞFİNDE SEÇİLDİ (${y.dosya}; DESIGN.md'deki ve kabul ölçütlerindeki palet/font kararlarının yerine geçer): ${p.direction.text}`, 1500);
+  post(p, 'ceo', 'all', 'Yön keşfi sonucu:\n' + ys.map((x, i) => `${i + 1 === n ? '★' : '•'} ${i + 1}. ${x.ad || ''}: ${cut(String(x.ozet || ''), 160)}`).join('\n') + `\n\nSeçim: ${n}. yön${pick?.neden ? ' — ' + pick.neden : ''}${pick?.gelistir ? `\nGeliştirilecek: ${pick.gelistir}` : ''}\nDenemeler çalışma klasöründeki ${EXPLORE_DIR} klasöründe duruyor.`, { reqId: c.id, meet: 1 });
+  end(`${ys.length} yön denendi, ${n}. yön seçildi: ${y.ad || ''}`);
+}
+
 // gözden geçirme döngüsü: gözden geçirenler (temiz bağlam, yazmaz) → yapımcı süzer ve uygular (tek yazar) → tekrar; ciddi bulgu kalmayınca biter
 async function buildLoop(p, done, rounds, runOne) {
   const bt0 = (p.board || []).find(x => x.role === 'yapimci' && !x.kind); if (!bt0) return;
-  const builder = bt0.agent, builderCli = bt0.cli || bt0.provider || 'claude', revs = reviewersFor(S.hats, { builderAgent: builder, builderCli, members: membersOf(p) });
+  const builder = bt0.agent, builderCli = bt0.cli || bt0.provider || 'claude';
+  let revs = reviewersFor(S.hats, { builderAgent: builder, builderCli, members: membersOf(p) });
+  // bütçe incelemeye yetmiyorsa önce doğrulama: tasarım incelemesi bırakılır, denetim kalır (denetimsiz ürün "doğrulanmadı" sayılır)
+  const left = p.budget ? p.budget - (p.spent || 0) : Infinity;
+  if (left < REVIEW_COST * revs.length && revs.some(R => R.audit) && revs.length > 1) {
+    revs = revs.filter(R => R.audit);
+    post(p, 'ceo', 'user', `Token bütçesinde ${Math.max(0, Math.round(left / 1000))}k kaldı; doğrulama için yalnızca denetim yapılacak, tasarım incelemesi atlandı. Tam inceleme için bütçeyi artırıp "Devam et"e basabilirsin.`);
+  }
+  if (left < REVIEW_COST) post(p, 'ceo', 'user', `Uyarı: kalan token bütçesi (${Math.max(0, Math.round(left / 1000))}k) bir denetim için bile az olabilir; denetim yarıda kalırsa ürün "doğrulanmadı" sayılır.`);
   const who = R => `${R.label} (${S.agents[R.provider]?.name || R.provider})`;
   const rejected = [], stats = p.loop = { tur: 0, bulgu: 0, uygulandi: 0, reddedildi: 0 };
   for (let round = 1; round <= rounds + 1 && !p.cancelled; round++) {
@@ -1070,15 +1144,16 @@ async function buildLoop(p, done, rounds, runOne) {
       const review = prov => ask(p, R.agent, `GOZDEN_GECIRME (tur ${round})\nBu ürünün ${R.label} sorumlususun. Ürünü TEK bir yapımcı (${S.agents[builderCli]?.name || builderCli}, ${roleName(builder)}) yazdı; sen dosya YAZMAZSIN, yalnızca bakar ve somut geri bildirim verirsin. Odak: ${R.focus}.\n` +
         `PROJE TANIMI: ${cut(p.brief || '', 1000)}${visionText(p)}${crit}` +
         ((p.decisions || []).length ? `\nYAPIMCININ KARARLARI (bilinçli seçimler; ancak kullanıcıya zarar veriyorsa itiraz et):\n${p.decisions.map(x => '- ' + x).join('\n')}` : '') +
-        `\nÜRÜN DOSYALARI (çalışma klasöründe; hepsine erişimin var, kendin oku): ${files.join(', ') || '(yok)'}${verifyText(v)}` +
+        `\nÜRÜN DOSYALARI (çalışma klasöründe; hepsine erişimin var, kendin oku): ${files.join(', ') || '(yok)'}${verifyText(v, R.audit ? 1 : 0)}` +
         (rejected.length ? `\nYAPIMCININ GEREKÇESİYLE REDDETTİKLERİ (ikna edici değilse tekrar et, değilse önerme):\n${rejected.slice(-8).map(x => `- ${x.text} → ${x.not}`).join('\n')}` : '') +
         `\nDosyaları OKU${R.agent === 'designer' && v.visual ? ' ve ekran görüntülerini Read ile aç' : ''}. Kullanıcı bu ürünü gerçekten beğensin diye en önemli sorunları bul. En fazla 6 bulgu; zevk farkı ve belirsiz öneri yazma. Önem: kritik = kullanıcıyı engelliyor ya da açıkça kötü görünüyor; orta = belirgin kalite sorunu; kucuk = cila. Dosyaları okuyamadıysan ya da ürünü göremediysen tahmin yürütme: JSON'a "incelenemedi":true ekle.\n` +
         `Yanıtının EN SON satırı SADECE şu JSON olsun: {"olmus":["en fazla 3 güçlü yan"],"bulgular":[{"onem":"kritik|orta|kucuk","konu":"ne, nerede (dosya/bölüm)","oneri":"nasıl düzeltilir, somut"}]${R.audit ? ',"kabul":{"K1":"gecti — kanıt"},"puan":{"dogruluk":n,"tamlik":n,"talimat":n,"not":"somut kanıt"}' : ''}}`,
-        { purpose: R.label, phase: 'plan', provider: prov, cat: categoryOf(R.agent, 'inceleme denetim review', '') });
+        { purpose: R.label, phase: 'plan', provider: prov, cat: categoryOf(R.agent, 'inceleme denetim review', ''), turns: Math.max(S.hats[R.agent]?.turns || 8, 20) });   // dosyaları ve ekran görüntüsü dilimlerini okumak adım ister
       const blind = r => !r.error && (/"incelenemedi"\s*:\s*true/.test(r.response) || !findingsOf(r.response));
       let r = await review(prov0);
-      // inceleyemeyen (dosya okuyamayan, biçime uymayan) ajanın boş listesi "sorun yok" sayılmaz: inceleme Claude Code ile bir kez daha yapılır
-      if (blind(r) && r.provider !== 'claude' && provUsable('claude')) { logEv(p, r.provider, 'task', `${R.label}: ürünü inceleyemedi, Claude Code ile yeniden inceleniyor`); r = await review('claude'); }
+      // inceleyemeyen (dosya okuyamayan, biçime uymayan) ya da hata veren ajanın sonucu "sorun yok" sayılmaz: inceleme Claude Code ile bir kez daha yapılır
+      const retry = r => (blind(r) || (r.error && r.subtype !== 'budget' && !r.userStop)) && r.provider !== 'claude' && provUsable('claude') && !p.cancelled;
+      if (retry(r)) { logEv(p, r.provider, 'task', `${R.label}: ${r.error ? 'hata verdi' : 'ürünü inceleyemedi'}, Claude Code ile yeniden inceleniyor`); r = await review('claude'); }
       if (r.error) { failed.push(r.error); return; }
       if (blind(r)) { failed.push(`${R.label} ürünü inceleyemedi`); return; }
       const fd = findingsOf(r.response);
@@ -1094,6 +1169,8 @@ async function buildLoop(p, done, rounds, runOne) {
     }));
     if (revs.length && failed.length === revs.length) { rb.status = 'hata'; rb.endedAt = Date.now(); rb.summary = 'Gözden geçirenler çalışamadı: ' + cut(failed[0], 120); post(p, 'ceo', 'user', `Gözden geçirme durdu: ${cut(failed[0], 160)}. Limit dolduysa sıfırlanınca "Devam et" ile sürdürebilirsin.`); save(); emit('project', p); break; }
     for (const x of v.checks.issues.filter(x => x.sev === 'hata').slice(0, 8)) findings.push({ onem: 'kritik', text: `${x.file}: ${x.msg}`, from: 'Otomatik kontrol' });
+    for (const x of v.checks.issues.filter(x => x.sev === 'kullanim').slice(0, 5)) findings.push({ onem: 'orta', text: `${x.file}: ${x.msg}`, from: 'Kullanılabilirlik denetimi' });
+    for (const x of v.checks.issues.filter(x => x.sev === 'tasarim').slice(0, 4)) findings.push({ onem: 'orta', text: `${x.file}: ${x.msg}`, from: 'Jenerik tasarım denetimi' });
     if (v.visual) for (const e of v.visual.errors.slice(0, 5)) findings.push({ onem: 'kritik', text: 'Tarayıcıda: ' + e, from: 'Otomatik kontrol' });
     const serious = findings.filter(x => x.onem !== 'kucuk');
     rb.status = 'bitti'; rb.endedAt = Date.now(); rb.summary = `${findings.length} bulgu (${serious.length} ciddi)`; stats.tur = round; stats.bulgu += findings.length; save(); emit('project', p);
@@ -1123,7 +1200,7 @@ async function buildLoop(p, done, rounds, runOne) {
 async function executePlan(p, { resume = false } = {}) {
   let tasks, done = {};
   if (resume) {
-    const bd = p.board = (p.board || []).filter(x => !(['ekip toplantısı', 'gözden geçirme'].includes(x.kind) && x.status !== 'bitti'));   // yarım kalan toplantı yeniden yapılır
+    const bd = p.board = (p.board || []).filter(x => !(['ekip toplantısı', 'gözden geçirme', 'yön keşfi'].includes(x.kind) && x.status !== 'bitti'));   // yarım kalan toplantı yeniden yapılır
     if (!bd.length) return;
     for (const x of bd) if (x.status === 'bitti') done[x.id] = { agent: x.agent, summary: x.summary || '', body: '', metrics: x.metrics };
     for (const x of bd) if (x.status !== 'bitti') { x.status = 'bekliyor'; delete x.startedAt; delete x.endedAt; }
@@ -1133,7 +1210,7 @@ async function executePlan(p, { resume = false } = {}) {
     const plan = p.pendingPlan; if (!plan) return; p.pendingPlan = null; tasks = plan.tasks; if (plan.vision) p.vision = plan.vision; p.criteria = plan.criteria || []; p.acceptance = {};
     for (const t of tasks) t.caps ||= capsForTask(t, t.agent, p.brief);
     if (!plan.mode) { const o = productize(tasks, S.hats); tasks = o.tasks; plan.mode = o.mode; }
-    p.mode = plan.mode; p.decisions = []; p.loop = null;
+    p.mode = plan.mode; p.decisions = []; p.loop = null; p.direction = null;
     for (const t of tasks) t.cli = assignCli(p, t);
     p.board = tasks.map(t => ({ id: t.id, agent: t.agent, cli: t.cli, instruction: t.instruction, deliverable: t.deliverable || '', needs: t.needs || [], caps: t.caps, criteria: t.criteria || [], role: t.role, status: 'bekliyor' }));
     p.runId = uid(); p.runStart = Date.now();
@@ -1149,6 +1226,7 @@ async function executePlan(p, { resume = false } = {}) {
     const deps = (t.needs || []).map(n => done[n]).filter(Boolean);
     post(p, 'ceo', t.agent, t.instruction);
     for (const d of deps) post(p, d.agent, t.agent, `Çıktımın özeti: ${d.summary}`, { handoff: true });
+    if (t.role === 'yapimci' && !t.kind && exploreOn() && !p.direction && !p.cancelled) await exploreDirections(p, t, deps);
     await runTask(p, t, brief, deps, done);
   };
   try {
@@ -1180,10 +1258,13 @@ async function executePlan(p, { resume = false } = {}) {
       p.participants = [...new Set([...(p.participants || []), ...ds.map(d => d.agent)])];
       const files = listFiles(wsDir(p)), cr = p.criteria || [], acc = p.acceptance || {}, passN = cr.filter(c => acc[c.id]?.durum === 'gecti').length;
       const accText = cr.length ? `\n\nKabul ölçütleri: ${passN}/${cr.length} karşılandı` + (cr.some(c => acc[c.id]?.durum !== 'gecti') ? '\n' + cr.filter(c => acc[c.id]?.durum !== 'gecti').map(c => `• ${c.id} ${acc[c.id] ? 'karşılanmadı' : 'denetlenmedi'}: ${c.olcut}${acc[c.id]?.not ? ' — ' + acc[c.id].not : ''}`).join('\n') : '') : '';
-      post(p, 'ceo', 'user', `${main.length} görev tamamlandı.\n` + main.map(d => `• ${S.agents[d.metrics?.provider || cliOf(p, d.agent)]?.name || d.agent} · ${roleName(d.agent)}: ${cut(d.summary, 160)}`).join('\n') +
+      // yapımcının "kontrol ettim" demesi doğrulama değildir: ölçüt yalnızca bağımsız denetimle "geçti" sayılır
+      const unchecked = cr.filter(c => !acc[c.id]).length;
+      const warn = !audited(p) ? '⚠ DOĞRULANMADI: ürün bağımsız olarak denetlenemedi; aşağıdaki sonuçlar ajanların kendi beyanıdır.\n\n' : unchecked ? `⚠ ${unchecked} kabul ölçütü denetlenmedi; bunlar için ajanların kendi beyanı dışında kanıt yok.\n\n` : '';
+      post(p, 'ceo', 'user', warn + `${main.length} görev tamamlandı.\n` + main.map(d => `• ${S.agents[d.metrics?.provider || cliOf(p, d.agent)]?.name || d.agent} · ${roleName(d.agent)}: ${cut(d.summary, 160)}`).join('\n') +
         (p.loop ? `\n\nYapımcı ↔ gözden geçirme: ${p.loop.tur} tur, ${p.loop.bulgu} bulgu, ${p.loop.uygulandi} uygulandı, ${p.loop.reddedildi} gerekçeyle reddedildi.` : '') +
         (revs.length || meets.length ? `\n\nEkip içi kalite: ${revs.length} akran incelemesi (${applied} tanesinde öneriler uygulandı)${meets.length ? `, ${meets.length} ekip toplantısı (${decN} karar uygulandı${rejN ? `, ${rejN} öneri reddedildi` : ''})` : ''}.` : '') +
-        accText + `\n\nOtomatik doğrulama: ${fin.checks.errors} hata, ${fin.checks.warnings} uyarı${fin.visual ? `, tarayıcıda ${fin.visual.errors.length} sorun` : ''}.` + (files.length ? `\n\nÇıktı dosyaları (${files.length}):\n` + files.slice(0, 20).map(x => '• ' + x).join('\n') : ''));
+        accText + `\n\nOtomatik doğrulama: ${fin.checks.errors} hata, ${fin.checks.warnings} uyarı${fin.checks.usability ? `, ${fin.checks.usability} kullanılabilirlik sorunu` : ''}${fin.checks.design ? `, ${fin.checks.design} jenerik tasarım kalıbı` : ''}${fin.visual ? `, tarayıcıda ${fin.visual.errors.length} sorun` : ''}.` + (files.length ? `\n\nÇıktı dosyaları (${files.length}):\n` + files.slice(0, 20).map(x => '• ' + x).join('\n') : ''));
     }
     p.tasksLog = [...(p.tasksLog || []), ...tasks.map(t => ({ agent: t.agent, instruction: t.instruction }))].slice(-30);
   } finally {
@@ -1447,7 +1528,7 @@ http.createServer(async (req, res) => {
         } else { S.settings.cli = true; checkAuth(); checkProviders(); }
         save(); emit('state', publicState()); return json(res, { ok: true, on: S.settings.cli !== false });
       }
-      if (req.method === 'POST' && parts[1] === 'settings') { const b = await body(req); if (b.lang === 'tr' || b.lang === 'en') S.settings.lang = b.lang; if ([1, 2, 3].includes(+b.parallel)) S.settings.parallel = +b.parallel; if (b.review !== undefined && [0, 1, 2].includes(+b.review)) S.settings.review = +b.review; if (b.providers && typeof b.providers === 'object') for (const k of ['codex', 'antigravity']) { const v = b.providers[k]; if (!v || typeof v !== 'object') continue; const c = S.settings.providers[k]; if (v.on != null) c.on = !!v.on; if (v.model != null) c.model = safeModel(v.model); if (k === 'antigravity' && v.trust != null) c.trust = !!v.trust; } if (b.resetRouting) S.routing = {}; for (const k of ['subUsd', 'hourTry', 'usdTry']) if (b[k] !== undefined) S.settings[k] = Math.max(0, +b[k] || 0) || null; if (b.baseMin && typeof b.baseMin === 'object') S.settings.baseMin = Object.fromEntries(Object.entries(b.baseMin).filter(([k, v]) => S.hats[k] && +v > 0).map(([k, v]) => [k, Math.min(2400, +v)])); save(); emit('state', publicState()); return json(res, { ok: true }); }
+      if (req.method === 'POST' && parts[1] === 'settings') { const b = await body(req); if (b.lang === 'tr' || b.lang === 'en') S.settings.lang = b.lang; if ([1, 2, 3].includes(+b.parallel)) S.settings.parallel = +b.parallel; if (b.review !== undefined && [0, 1, 2].includes(+b.review)) S.settings.review = +b.review; if (b.explore !== undefined) S.settings.explore = !!b.explore; if (b.providers && typeof b.providers === 'object') for (const k of ['codex', 'antigravity']) { const v = b.providers[k]; if (!v || typeof v !== 'object') continue; const c = S.settings.providers[k]; if (v.on != null) c.on = !!v.on; if (v.model != null) c.model = safeModel(v.model); if (k === 'antigravity' && v.trust != null) c.trust = !!v.trust; } if (b.resetRouting) S.routing = {}; for (const k of ['subUsd', 'hourTry', 'usdTry']) if (b[k] !== undefined) S.settings[k] = Math.max(0, +b[k] || 0) || null; if (b.baseMin && typeof b.baseMin === 'object') S.settings.baseMin = Object.fromEntries(Object.entries(b.baseMin).filter(([k, v]) => S.hats[k] && +v > 0).map(([k, v]) => [k, Math.min(2400, +v)])); save(); emit('state', publicState()); return json(res, { ok: true }); }
       if (req.method === 'POST' && parts[1] === 'event') {   // dış araçlar durum bildirebilir: {name, state: working|idle|blocked|done, note}
         if (process.env.OFIS_API_TOKEN && req.headers['x-ofis-token'] !== process.env.OFIS_API_TOKEN) return json(res, { error: 'token gerekli' }, 401);
         const b = await body(req); const name = String(b.name || '').trim().slice(0, 24); if (!name) return json(res, { error: 'name gerekli' }, 400);
@@ -1485,7 +1566,7 @@ http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x'), [pid, ...rest] = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
     const p = S.projects.find(x => x.id === pid); if (!p) { res.writeHead(404); return res.end('proje yok'); }
     const root = wsDir(p), fp = path.resolve(root, rest.join('/') || 'index.html');
-    if (!(fp === root || fp.toLowerCase().startsWith(root.toLowerCase() + path.sep)) || rest.some(x => x.startsWith('.'))) { res.writeHead(403); return res.end('yasak'); }
+    if (!(fp === root || fp.toLowerCase().startsWith(root.toLowerCase() + path.sep)) || rest.some((x, i) => x.startsWith('.') && !(i === 0 && x === EXPLORE_DIR && rest.length === 2))) { res.writeHead(403); return res.end('yasak'); }   // gizli dosyalar sunulmaz; yalnızca yön keşfi denemeleri görülebilir
     const file = fs.existsSync(fp) && fs.statSync(fp).isDirectory() ? path.join(fp, 'index.html') : fp;
     if (!fs.existsSync(file) || !fs.statSync(file).isFile()) { res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }); return res.end('Dosya yok: ' + rest.join('/')); }
     res.writeHead(200, { 'content-type': PREVIEW_MIME[path.extname(file).toLowerCase()] || 'application/octet-stream', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
