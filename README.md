@@ -314,16 +314,8 @@ curl -X POST http://localhost:3000/api/event -H "content-type: application/json"
 Tüm durum (projeler, ajanların dersleri, ayarlar, ofis düzeni, Electron profili) proje içindeki `data/` klasöründe tutulur ve depoya eklenmez (`.gitignore`). CLI girişleri her CLI'nin kendi yerinde (işletim sistemi anahtarlığı vb.) kalır; uygulama bunları okumaz ve kopyalamaz.
 
 ## Geliştirme
-- `npm test`: Node'un yerleşik test çalıştırıcısıyla, test modunda (gerçek CLI çalışmaz, token harcanmaz):
-  - `test/policy.test.mjs`: klasör dışı yol tespiti, komut sınıflandırma, paket ayrıştırma ve yazım hatası tuzağı, paket güvenlik kararı, puanlama, klasör doğrulama, şablon tutarlılığı.
-  - `test/growth.test.mjs`: dersler, seviye, gelişim alanı, tasarruf hesabı.
-  - `test/providers.test.mjs`: iş türü ayrımı, öğrenme/seçim, Codex ve Antigravity çıktı ayrıştırma, güvenli argüman.
-  - `test/design.test.mjs`: jenerik tasarım ve kullanılabilirlik denetimleri, sektör yönleri, estetik becerisinin önceliği.
-  - `test/team.test.mjs`: gölge git kayıt noktaları (60 MB'lık klasör, kullanıcının `.git`'i korunur, paralel kayıt, geri almanın geri alınması), değişiklik risk denetimi, uzun süreli bellek araması, Codex web araması yönlendirmesi, MCP araç listesi.
-  - `test/server.test.mjs`: ayrı bir veri klasörüyle gerçek sunucu (ekip araçları ve bellek ucu dahil) — Host/Origin koruması, dış olay girişi, düzen, plan→pano→puan→geçmiş akışı, token bütçesi, çökme sonrası kurtarma, çoklu CLI yönlendirme.
-- `npm run shots`: README görsellerini (animasyon dahil) test modunda yeniden üretir.
+- `npm run shots`: README görsellerini (animasyon dahil) demo modunda (gerçek CLI çalışmaz, token harcanmaz) yeniden üretir.
 - `node tools/make-icon.mjs`: "VL" ikonunu üretir (`public/icon.svg`, `public/icon-256.png`, `electron/icon.ico`).
-- Arayüzün 3B kısmı (animasyonlar, düzenleyici, mini pencere) otomatik test edilmez; elle denenir.
 
 ## Görsel kaynaklar
 - Kenney Furniture Kit ve Mini Characters (CC0) — https://kenney.nl (`public/assets/*`)

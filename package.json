@@ -9,7 +9,6 @@
     "start": "node server.js",
     "app": "node launcher.mjs",
     "electron": "node electron/run.mjs",
-    "test": "node --test test/*.test.mjs",
     "shots": "electron tools/screenshots.cjs"
   },
   "devDependencies": {

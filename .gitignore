@@ -16,8 +16,7 @@ desktop.ini
 *.log
 assets/kenney/
 .tmp/
-test/.data-*/
-test/.fixtures-*/
+test/
 *.lnk
 .claude/
 *.bak
