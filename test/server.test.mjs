@@ -351,6 +351,21 @@ test('proje yönetimi: kabul ölçütleri, kesin kontroller, önizleme güvenli�
   } finally { await R.stop(); }
 });
 
+test('ekip araçları: mesaj sohbete ve gelen kutusuna düşer, yanlış alıcı reddedilir, istek proje çalışmıyorken açılmaz; bellek ucu', async () => {
+  const p = (await S.api('projects', { name: 'Ekip araçları' })).json;
+  const call = b => S.api('team', { project: p.id, agent: 'claude', ...b }).then(r => r.json.text);
+  assert.match(await call({ op: 'message', to: 'designer', text: 'x' }), /görev çalışırken/, 'şapka/görev yoksa kullanılamaz');
+  assert.match(await call({ hat: 'developer', op: 'message', to: 'designer', text: 'Karakter 32x32 olsun' }), /İletildi/);
+  assert.match(await call({ hat: 'developer', op: 'message', to: 'developer', text: 'kendime' }), /Geçersiz alıcı/);
+  assert.match(await call({ hat: 'designer', op: 'inbox' }), /Karakter 32x32/);
+  assert.match(await call({ hat: 'designer', op: 'inbox' }), /boş/, 'okunan mesaj tekrar gelmez');
+  assert.match(await call({ hat: 'developer', op: 'request', to: 'designer', work: 'yürüme kareleri' }), /çalışmıyor/);
+  const st = (await S.api('state')).json, pr = st.projects.find(x => x.id === p.id);
+  assert.ok(pr.messages.some(m => m.mail && /32x32/.test(m.text)), 'mesaj sohbette görünür');
+  assert.match(await call({ hat: 'developer', op: 'memory', query: 'hiç olmayan konu' }), /bulunamadı/);
+  const lm = (await S.api('longmem')).json; assert.equal(typeof lm.total, 'number'); assert.equal(st.memory.total, lm.total);
+});
+
 test('CLI düğmesi: demo modunda bağlantı kesme Claude yokmuş gibi davranmaz, durum döner', async () => {
   const r = await S.api('cli', { on: false });
   assert.equal(r.status, 200);

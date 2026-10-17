@@ -12,8 +12,13 @@ import { checkWorkspace, checksText, walk } from './lib/checks.mjs';
 import { productize, reviewersFor, findingsOf, decisionsListOf, triageOf, stripSections } from './lib/orchestra.mjs';
 import { aestheticPrompt, presetPrompt, usabilityPrompt, copiedPreset } from './lib/design.mjs';
 import { createRequire } from 'node:module';
-import { growthPrompt, growthPromptEn, migrateAgent, addLesson, metricLessons, extractSelfReview, levelOf, focusOf, charterFor, baselineOf, savingsOf, MIN_ACCEPT } from './lib/growth.mjs';
-import { PROVIDERS, PROVIDER_KEYS, AGENT_PROVIDERS, CATEGORIES, PRIOR_SRC, categoryOf, recordResult, estimate, pickProvider, parseCodexLine, parseAgyLine, newAcc, shellQuote, safeModel, providerFits, cliGuide, mountWorkspaceMcp, restoreAllMounts } from './lib/providers.mjs';
+import { createHash } from 'node:crypto';
+import { gitAvailable, checkpoint, changes as gitChanges, fileAt, restore as gitRestore, SHA_RE } from './lib/checkpoints.mjs';
+import { riskyChanges, changeSummary } from './lib/changes.mjs';
+import { remember, recall, recallText } from './lib/memory.mjs';
+import { WATER_SCENARIOS, waterOf, addTokens } from './lib/water.mjs';
+import { growthPrompt, growthPromptEn, migrateAgent, addLesson, topLessons, metricLessons, extractSelfReview, levelOf, focusOf, charterFor, baselineOf, savingsOf, MIN_ACCEPT } from './lib/growth.mjs';
+import { PROVIDERS, PROVIDER_KEYS, AGENT_PROVIDERS, CATEGORIES, PRIOR_SRC, categoryOf, recordResult, estimate, pickProvider, parseCodexLine, parseAgyLine, newAcc, shellQuote, safeModel, providerFits, canImage, cliGuide, mountWorkspaceMcp, restoreAllMounts } from './lib/providers.mjs';
 import { parseUsage, parseReset, cut, validateDir, PATH_RE, norm, insideWs, outsidePaths, SENSITIVE, SAFE_SEG, isSafeReadOnly, DANGER, INSTALL, POP_NPM, POP_PY, lev, typoOf, ageText, fmtN, verdict, parseInstalls, npmSpec, classify, splitSummary, rubricOf, reviewOf, fixesOf, critiqueOf, repliesOf, decisionsOf, criteriaOf, acceptOf, W, scoreTask, TEMPLATES } from './lib/policy.mjs';
 
 const __dir = path.dirname(fileURLToPath(import.meta.url));
@@ -74,7 +79,8 @@ function checkProviders() {
     c.on('error', e => { clearTimeout(t); provInfo[k] = { installed: true, ok: false, text: cut(e.message, 60) }; emit('state', publicState()); });
     c.on('close', code => { clearTimeout(t); provInfo[k] = { installed: true, ok: code === 0, text: code === 0 ? cut(okText(out), 60) : failText }; emit('state', publicState()); });
   };
-  probe('codex', ['login', 'status'], o => o.trim().split('\n').pop() || 'giriş yapıldı', 'giriş yok — Bağlan');
+  // görsel üretimi yalnızca ChatGPT aboneliğiyle girişte açılır (API anahtarıyla girişte üretim API'den faturalanır)
+  probe('codex', ['login', 'status'], o => { S.settings.providers.codex.planAuth = /chatgpt/i.test(o); return o.trim().split('\n').pop() || 'giriş yapıldı'; }, 'giriş yok — Bağlan');
   // Antigravity'nin belgelenmiş bir giriş durumu komutu yok: girişi Bağlan ile yaptıysan kaydedilir, ilk işte giriş hatası çıkarsa geri alınır
   if (BINS.antigravity) { const g = S.settings.providers.antigravity; provInfo.antigravity = { installed: true, ok: !!g.loggedIn, text: g.loggedIn ? 'giriş yapıldı' : 'giriş yok — Bağlan' }; emit('state', publicState()); }
 }
@@ -198,7 +204,7 @@ function chooseProvider(agentId, cat, need = {}) {
   const usable = PROVIDER_KEYS.filter(k => provUsable(k) && fit(k).ok);
   if (pref !== 'auto' && pref !== 'claude' && provUsable(pref) && !fit(pref).ok) return { provider: 'claude', why: `${fit(pref).why} → bu görev Claude Code ile çalışıldı` };
   if (pref !== 'auto') return usable.includes(pref) || pref === 'claude' ? { provider: pref, why: 'ajan ayarı' } : { provider: 'claude', why: `${PROVIDERS[pref].label} kullanılamıyor, Claude Code ile çalışıldı` };
-  return pickProvider(S.routing, cat, usable) || { provider: 'claude', why: 'kullanılabilir başka CLI yok' };
+  return pickProvider(S.routing, cat, usable, { cfgs: S.settings.providers }) || { provider: 'claude', why: 'kullanılabilir başka CLI yok' };
 }
 // ---------- Ofis: lider, üyeler, görev ataması ----------
 const officeOf = p => S.offices.find(o => o.id === p?.officeId) || S.offices[0];
@@ -208,13 +214,43 @@ const leadOf = p => { const o = officeOf(p); return provUsable(o.lead) ? o.lead 
 function assignCli(p, t) {
   if (t.agent === 'ceo') return leadOf(p);
   const mem = membersOf(p), cat = categoryOf(t.agent, t.instruction, t.deliverable);
-  const need = { web: cat === 'arastirma' && /WebSearch|WebFetch/.test(S.hats[t.agent]?.tools || ''), bash: capTools(t.caps || []).includes('Bash') };
-  const fits = k => k === 'claude' || providerFits(k, need, S.settings.providers?.[k] || {}).ok;
+  const image = (t.caps || []).includes('gorsel-uret') && imagegenOn();
+  const need = { web: cat === 'arastirma' && /WebSearch|WebFetch/.test(S.hats[t.agent]?.tools || ''), bash: capTools(t.caps || []).includes('Bash'), image };
+  const fits = k => k === 'claude' ? !image : providerFits(k, need, S.settings.providers?.[k] || {}).ok;
   if (t.cli && mem.includes(t.cli) && fits(t.cli)) return t.cli;
   const pref = S.hats[t.agent]?.provider;
   if (pref && pref !== 'auto' && mem.includes(pref) && fits(pref)) return pref;
-  return pickProvider(S.routing, cat, mem.filter(fits))?.provider || mem.find(fits) || 'claude';
+  return pickProvider(S.routing, cat, mem.filter(fits), { cfgs: S.settings.providers, image })?.provider || mem.find(fits) || 'claude';
 }
+// ---------- Görsel üretimi (Codex, ChatGPT aboneliği) ----------
+// Ayrı ücret yok: görseller Codex'in ChatGPT planındaki limitinden düşer. API anahtarı CLI'lere hiç geçirilmez (cleanEnv) ve
+// Codex API anahtarıyla giriş yaptıysa görsel üretimi açılmaz. Limit hızlı tükendiği için proje başına sınır vardır.
+const imagegenOn = () => provUsable('codex') && canImage('codex', S.settings.providers.codex);
+const imageMax = () => Math.min(30, Math.max(1, +S.settings.providers.codex.imageMax || 8));
+const imageLeft = p => Math.max(0, imageMax() - (p?.images || 0));
+const CODEX_IMG = () => path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'generated_images');
+const IMG_RE = /\.(png|jpe?g|webp)$/i;
+function listImages(dir, out = new Map(), depth = 0) {
+  try { for (const e of fs.readdirSync(dir, { withFileTypes: true })) { const f = path.join(dir, e.name); if (e.isDirectory() && depth < 4) listImages(f, out, depth + 1); else if (IMG_RE.test(e.name)) out.set(f, fs.statSync(f).mtimeMs); } } catch {}
+  return out;
+}
+const sha1 = f => { try { return createHash('sha1').update(fs.readFileSync(f)).digest('hex'); } catch { return null; } };
+// Codex'in bu çalıştırmada ürettiği görseller: ajan kopyalamadıysa çalışma klasörüne (assets/uretilen/) alınır; Codex'teki asıllarına dokunulmaz
+function collectImages(p, before) {
+  const fresh = [...listImages(CODEX_IMG())].filter(([f, m]) => before.get(f) !== m).map(([f]) => f);
+  if (!fresh.length) return { n: 0, copied: [] };
+  const dir = wsDir(p), have = new Set(walk(dir, 1500).filter(f => IMG_RE.test(f)).map(sha1).filter(Boolean)), copied = [];
+  for (const f of fresh) {
+    if (have.has(sha1(f))) continue;   // ajan zaten klasöre kopyalamış
+    const to = path.join(dir, 'assets', 'uretilen'); fs.mkdirSync(to, { recursive: true });
+    let name = path.basename(f).toLowerCase().replace(/[^a-z0-9._-]+/g, '-'), i = 1;
+    while (fs.existsSync(path.join(to, name))) name = name.replace(/(-\d+)?(\.\w+)$/, `-${++i}$2`);
+    try { fs.copyFileSync(f, path.join(to, name)); copied.push('assets/uretilen/' + name); } catch {}
+  }
+  p.images = (p.images || 0) + fresh.length; save();
+  return { n: fresh.length, copied };
+}
+let imgLock = Promise.resolve();   // görsel üreten Codex çalıştırmaları sırayla: hangi görselin hangi projeye ait olduğu karışmasın
 // mesaj/günlük için: şapka anahtarını o şapkayı takan ajana (CLI) çevirir
 const cliOf = (p, k) => S.agents[k] ? k : k === 'ceo' ? leadOf(p) : p?.team?.[k];
 
@@ -320,6 +356,112 @@ function pickFolder() {   // Windows'un kendi klasör seçme penceresi
     const script = "[Console]::OutputEncoding=[Text.Encoding]::UTF8; Add-Type -AssemblyName System.Windows.Forms; $o=New-Object System.Windows.Forms.Form; $o.TopMost=$true; $o.Opacity=0; $o.ShowInTaskbar=$false; $o.StartPosition='CenterScreen'; $o.Show(); $f=New-Object System.Windows.Forms.FolderBrowserDialog; $f.Description='Ajanların çalışacağı klasörü seç'; $f.ShowNewFolderButton=$true; if($f.ShowDialog($o) -eq 'OK'){ Write-Output $f.SelectedPath }";
     execFile('powershell.exe', ['-NoProfile', '-STA', '-Command', script], { windowsHide: false, timeout: 10 * 60 * 1000 }, (err, out) => { picking = false; const p = String(out || '').trim(); resolve(p ? { path: p } : { cancel: true }); });
   });
+}
+
+// ---------- Uzun süreli bellek (lib/memory.mjs) ----------
+// Şapkanın en güçlü 24 dersinin dışına düşen dersler, biten projelerin özeti ve kararları, eski kullanıcı tercihleri burada birikir;
+// her görevde işe en ilgili birkaç kayıt isteme girer, ajan "memory_search" aracıyla kendisi de arayabilir. Ayrı dosyada tutulur.
+const MEM_FILE = path.join(DATA, 'memory.json');
+let MEM = { items: [] }; try { MEM = { items: [], ...JSON.parse(fs.readFileSync(MEM_FILE, 'utf8')) }; } catch {}
+let memT;
+const memSave = () => { clearTimeout(memT); memT = setTimeout(() => fs.writeFile(MEM_FILE, JSON.stringify(MEM), () => {}), 500); };
+const memAdd = e => { const r = remember(MEM, e); if (r) memSave(); return r; };
+// ders ekle; 24'ün dışına düşen ders kaybolmaz, belleğe arşivlenir
+const memoryText = (k, a, q) => {
+  const r = recall(MEM, cut(String(q || ''), 2000), { k: 4, hat: k, exclude: topLessons(a, 6).map(l => l.t) });   // istemde zaten olan dersler tekrar girmez
+  return r.length ? `\nGEÇMİŞTEN HATIRLADIKLARIN (uzun süreli bellek; bu işe uyuyorsa uygula):\n${recallText(r)}` : '';
+};
+const learn = (k, text, src) => S.hats[k] && addLesson(S.hats[k], text, src, Date.now(), l => memAdd({ kind: 'ders', text: l.t, hat: k, w: l.w }));
+
+// ---------- Çalışan görevler: dosya çakışması ve ekip içi mesajlaşma ----------
+// liveTasks: o an çalışan her görev (proje:görev → şapka, ajan, yazdığı dosyalar). Aynı dosyaya paralel iki görev yazarsa
+// ikisine de mesaj gider ve günlüğe düşer (eskiden yalnızca istemdeki "birbirinin dosyasına yazma" kuralına güveniliyordu).
+const liveTasks = new Map();
+const liveKey = (p, id) => `${p.id}:${id}`;
+function noteWrite(p, taskId, file) {
+  const me = taskId && liveTasks.get(liveKey(p, taskId)); if (!me || !file) return;
+  const dir = wsDir(p), rel = path.relative(dir, path.resolve(dir, String(file))).replace(/\\/g, '/');
+  if (rel.startsWith('..') || path.isAbsolute(rel)) return;
+  const k = rel.toLowerCase(); me.files.add(k);
+  for (const o of liveTasks.values()) {
+    if (o === me || o.p !== p || !o.files.has(k) || me.warned.has(o.id + k)) continue;
+    me.warned.add(o.id + k); o.warned.add(me.id + k);
+    const a = S.hats[me.hat]?.title || me.hat, b = S.hats[o.hat]?.title || o.hat;
+    logEv(p, me.cli, 'error', `Dosya çakışması: ${rel} dosyasını ${a} ve ${b} aynı anda değiştiriyor`);
+    sendMail(p, 'ceo', me.hat, `ÇAKIŞMA: ${rel} dosyasını ${b} de şu an değiştiriyor. Üzerine yazmadan önce dosyayı yeniden oku; gerekiyorsa team_message ile ${o.hat} ile anlaş.`);
+    sendMail(p, 'ceo', o.hat, `ÇAKIŞMA: ${rel} dosyasını ${a} de şu an değiştiriyor. Üzerine yazmadan önce dosyayı yeniden oku; gerekiyorsa team_message ile ${me.hat} ile anlaş.`);
+    for (const id of [me.id, o.id]) { const bt = (p.board || []).find(x => x.id === id); if (bt) { (bt.conflicts ||= []).includes(rel) || bt.conflicts.push(rel); } }
+    save(); emit('project', p);
+  }
+}
+
+// Mesaj panosu: ajanlar çalışırken birbirine yazar (team_message), gelen kutusunu okur (team_inbox), anında soru sorar (team_ask)
+// ve başka bir şapkaya iş ister (team_request). Mesajlar sohbette de görünür.
+function sendMail(p, from, to, text, extra = {}) {
+  const m = { id: uid(), ts: Date.now(), from, to, text: cut(String(text || ''), 1200), read: [] };
+  (p.mail ||= []).push(m); if (p.mail.length > 200) p.mail.splice(0, p.mail.length - 200);
+  post(p, from, to, text, { mail: 1, ...extra });
+  return m;
+}
+function inbox(p, hat, { peek = false } = {}) {
+  const list = (p.mail || []).filter(m => (m.to === hat || m.to === 'all') && m.from !== hat && !m.read.includes(hat));
+  if (!peek) { for (const m of list) m.read.push(hat); if (list.length) save(); }
+  return list;
+}
+const mailText = list => list.map(m => `- ${S.hats[m.from]?.title || m.from}${m.to === 'all' ? ' (herkese)' : ''}: ${m.text}`).join('\n');
+const teamHats = p => [...new Set([...Object.keys(p.team || {}), ...(p.board || []).map(x => x.agent)])].filter(k => S.hats[k]);
+const OFIS_TEAM_TOOLS = ['team_message', 'team_inbox', 'team_ask', 'team_request', 'memory_search'];   // approver.js'teki ekip/bellek araçları
+const TEAM_TOOLS = OFIS_TEAM_TOOLS.filter(n => n !== 'team_request').map(n => 'mcp__ofis__' + n), TEAM_REQ = 'mcp__ofis__team_request';
+const teamGuide = (p, hat, work) => !p?.executing ? '' : `\nEKİP İLETİŞİMİ (ofisin "ofis" MCP araçları; ekipteki şapkalar: ${teamHats(p).filter(k => k !== hat).join(', ') || 'yok'}):` +
+  `\n- team_message {to, text}: bir ekip arkadaşına ya da "all"a kısa not bırak (aldığın ortak bir karar, onun işini etkileyen bir değişiklik).` +
+  `\n- team_inbox {}: sana gelen mesajları oku. Uzun işlerde ara sıra ve teslimden önce bir kez bak.` +
+  `\n- team_ask {to, question}: işini engelleyen bir soruyu hemen sor; yanıt birkaç saniyede gelir. Görev başına en fazla 3 soru.` +
+  (work ? `\n- team_request {to, work, deliverable}: başka bir şapkaya ayrı bir iş ver (ör. tasarımcıdan bir görsel/asset). İş paralel çalışır; bitince team_inbox'a haber gelir, sen beklemeden devam et. Proje başına en fazla 3 istek.` : '') +
+  `\n- memory_search {query}: geçmiş projelerden ilgili ders, karar ve tercihleri ara.` +
+  `\nGereksiz mesaj atma; yalnızca işi gerçekten ilerletecekse kullan.`;
+// proje çalışırken team_request ile eklenen işleri çalıştırır (executePlan kurar)
+const runCtx = new Map();
+const REQ_MAX = 3, ASK_MAX = 3;
+async function teamCall(b) {
+  const p = S.projects.find(x => x.id === b.project); if (!p) return { text: 'Proje bulunamadı.' };
+  const lt = liveTasks.get(liveKey(p, b.task)) || [...liveTasks.values()].find(x => x.p === p && x.cli === b.agent);
+  const hat = lt?.hat || (S.hats[b.hat] ? b.hat : null);
+  if (!hat) return { text: 'Bu araç yalnızca bir görev çalışırken kullanılabilir.' };
+  const to = String(b.to || '').toLowerCase().trim(), hats = teamHats(p);
+  const badTo = () => ({ text: `Geçersiz alıcı "${to}". Kullanılabilir: ${[...hats.filter(k => k !== hat), 'all'].join(', ')}` });
+  if (b.op === 'inbox') { const l = inbox(p, hat); return { text: l.length ? `Gelen mesajlar (${l.length}):\n${mailText(l)}` : 'Gelen kutun boş.' }; }
+  if (b.op === 'memory') { const r = recall(MEM, String(b.query || ''), { k: 8, minScore: 0.5 }); return { text: r.length ? recallText(r) : 'İlgili bir kayıt bulunamadı.' }; }
+  const text = String(b.text || b.question || b.work || '').trim(); if (!text) return { text: 'Metin boş.' };
+  if (b.op === 'message') {
+    if (to !== 'all' && (!S.hats[to] || to === hat)) return badTo();
+    sendMail(p, hat, to, text); logEv(p, lt?.cli || b.agent, 'tool', `Ekibe mesaj → ${to}`);
+    return { text: `İletildi (${to}).` };
+  }
+  if (b.op === 'ask') {
+    if (!S.hats[to] || to === hat) return badTo();
+    if (lt && (lt.asks = (lt.asks || 0) + 1) > ASK_MAX) return { text: `Bu görevde soru hakkın doldu (${ASK_MAX}); varsayımını yanıtında açıkça belirterek devam et.` };
+    sendMail(p, hat, to, 'Soru: ' + text);
+    const theirs = (p.board || []).filter(x => x.agent === to && x.summary).map(x => x.summary).slice(-2).join(' | ');
+    const a = await ask(p, to, `SORU/CEVAP_ISTEGI\n${S.hats[hat].title} çalışırken sana soruyor: ${cut(text, 600)}\nPROJE: ${cut(p.brief || '', 600)}${theirs ? `\nSENİN BU PROJEDEKİ İŞİN (özet): ${cut(theirs, 600)}` : ''}${(p.decisions || []).length ? `\nKARARLAR: ${cut(p.decisions.join(' | '), 500)}` : ''}\nEn fazla 80 kelimeyle, somut yanıtla. Bilmiyorsan "bilmiyorum" de ve makul bir varsayım öner.`,
+      { purpose: 'ekip sorusu', phase: 'text', model: S.hats[to].model, nogate: true });
+    if (a.error) return { text: 'Yanıt alınamadı; varsayımını belirterek devam et.' };
+    sendMail(p, to, hat, a.response); (p.mail.at(-1).read ||= []).push(hat);   // yanıt doğrudan araç sonucunda döner, gelen kutusunda tekrar görünmez
+    return { text: `${S.hats[to].title} yanıtladı: ${a.response}` };
+  }
+  if (b.op === 'request') {
+    const ctx = runCtx.get(p.id);
+    if (!ctx || !p.executing || p.cancelled) return { text: 'Proje şu an çalışmıyor; istek açılamaz.' };
+    if (!S.hats[to] || to === hat || ['ceo', 'auditor'].includes(to)) return { text: `Geçersiz alıcı "${to}". İş istenebilecekler: ${hats.filter(k => !['ceo', 'auditor', hat].includes(k)).join(', ') || 'yok'}` };
+    if ((ctx.reqs = (ctx.reqs || 0) + 1) > REQ_MAX) return { text: `Bu projede iş isteği hakkı doldu (${REQ_MAX}). İşi kendin yap ya da varsayımını belirt.` };
+    const t = { id: `i${ctx.reqs}-${uid().slice(0, 4)}`, agent: to, kind: 'istek', needs: [], instruction: cut(`${S.hats[hat].title} istiyor: ${text}`, 800), deliverable: cut(String(b.deliverable || ''), 160), from: hat };
+    t.caps = capsForTask(t, to, p.brief, { imagegen: imagegenOn() }); t.cli = assignCli(p, t); p.team[to] ||= t.cli;
+    p.board.push({ id: t.id, agent: t.agent, cli: t.cli, kind: t.kind, caps: t.caps, instruction: t.instruction, deliverable: t.deliverable, needs: [], status: 'bekliyor', from: hat });
+    save(); emit('project', p);
+    sendMail(p, hat, to, `İş isteği (${t.id}): ${text}${t.deliverable ? ` → ${t.deliverable}` : ''}`);
+    ctx.spawn(t);
+    return { text: `İstek panoya eklendi (${t.id}, ${S.hats[to].title}). Bitince team_inbox'ına haber gelir; beklemeden kendi işine devam et.` };
+  }
+  return { text: 'Bilinmeyen işlem.' };
 }
 
 // ---------- Eşzamanlılık kapısı ----------
@@ -492,9 +634,9 @@ function activityText(name, input = {}) {
   }
 }
 
-function runClaude({ agentId, p, prompt, system, model, tools, allow, turns, mode, cwd, think }) {
+function runClaude({ agentId, p, prompt, system, model, tools, allow, turns, mode, cwd, think, task, hat }) {
   return new Promise(resolve => {
-    const mcp = { mcpServers: { ofis: { command: process.execPath, args: [path.join(__dir, 'approver.js')], env: { OFIS_URL: `http://127.0.0.1:${PORT}`, OFIS_AGENT: agentId, OFIS_PROJECT: p?.id || '', ELECTRON_RUN_AS_NODE: '1' } } } };
+    const mcp = { mcpServers: { ofis: { command: process.execPath, args: [path.join(__dir, 'approver.js')], env: { OFIS_URL: `http://127.0.0.1:${PORT}`, OFIS_AGENT: agentId, OFIS_PROJECT: p?.id || '', OFIS_TASK: task || '', OFIS_HAT: hat || '', ELECTRON_RUN_AS_NODE: '1' } } } };
     const args = ['-p', '--output-format', 'stream-json', '--verbose', '--model', model, '--append-system-prompt', system, '--max-turns', String(turns),
       '--setting-sources', 'project', '--disable-slash-commands', '--no-session-persistence', '--strict-mcp-config', '--mcp-config', JSON.stringify(mcp),
       '--permission-prompt-tool', 'mcp__ofis__approve', '--permission-mode', mode, '--tools', tools,
@@ -516,6 +658,7 @@ function runClaude({ agentId, p, prompt, system, model, tools, allow, turns, mod
         if (m.type === 'assistant') for (const c of m.message?.content || []) {
           if (c.type === 'tool_use') {
             const t = activityText(c.name, c.input), kind = toolKind(c.name);
+            if (kind === 'write' && p) noteWrite(p, task, c.input?.file_path || c.input?.notebook_path);
             if (!m.parent_tool_use_id) { status(agentId, 'working', t); emit('activity', { agent: agentId, text: t, tool: c.name, kind }); }
             logEv(p, agentId, m.parent_tool_use_id ? 'sub' : 'tool', t);
             if (kind === 'delegate') { subs.set(c.id, true); emit('sub', { agent: agentId, id: c.id, on: true, text: cut(c.input?.description || c.input?.prompt || 'yardımcı', 40) }); }
@@ -551,35 +694,59 @@ function runClaude({ agentId, p, prompt, system, model, tools, allow, turns, mod
 // agy'de çalıştırma başına MCP bayrağı yok: sunucu proje klasöründeki .agents/mcp_config.json ile (yalnızca çalıştırma süresince) verilir,
 // kullanıcının kendi dosyası varsa korunur ve sonra aynen geri yazılır. Başsız modda MCP izni sorulamadığı için kullanıcı Analiz → CLI kartından
 // onaylarsa genel ayara TEK bir dar kural eklenir: mcp(ofis/screenshot) (başka hiçbir araç/izin açılmaz).
+// Ekip araçları (team_*, memory_search) da aynı düğmeyle, araç başına ayrı dar kuralla açılır.
 const AGY_SETTINGS = path.join(os.homedir(), '.gemini', 'antigravity-cli', 'settings.json'), AGY_RULE = 'mcp(ofis/screenshot)';
-function agyShotAllowed() { try { return (JSON.parse(fs.readFileSync(AGY_SETTINGS, 'utf8')).permissions?.allow || []).includes(AGY_RULE); } catch { return false; } }
+const AGY_TEAM_RULES = OFIS_TEAM_TOOLS.map(n => `mcp(ofis/${n})`), AGY_RULES = [AGY_RULE, ...AGY_TEAM_RULES];
+const agyAllow = () => { try { return JSON.parse(fs.readFileSync(AGY_SETTINGS, 'utf8')).permissions?.allow || []; } catch { return []; } };
+function agyShotAllowed() { return agyAllow().includes(AGY_RULE); }
+function agyTeamAllowed() { const a = agyAllow(); return AGY_TEAM_RULES.every(r => a.includes(r)); }
 function setAgyShot(on) {
   let j = {};
   if (fs.existsSync(AGY_SETTINGS)) { try { j = JSON.parse(fs.readFileSync(AGY_SETTINGS, 'utf8')); } catch { throw new Error('Antigravity ayar dosyası okunamadı (geçersiz JSON); dosyaya dokunulmadı'); } }
-  const pm = j.permissions ||= {}; pm.allow = (pm.allow || []).filter(x => x !== AGY_RULE); if (on) pm.allow.push(AGY_RULE);
+  const pm = j.permissions ||= {}; pm.allow = (pm.allow || []).filter(x => !AGY_RULES.includes(x)); if (on) pm.allow.push(...AGY_RULES);
   fs.mkdirSync(path.dirname(AGY_SETTINGS), { recursive: true }); fs.writeFileSync(AGY_SETTINGS, JSON.stringify(j, null, 2));
   return agyShotAllowed();
 }
-const agyMcpOn = (dir, p) => mountWorkspaceMcp(path.join(dir, '.agents', 'mcp_config.json'), 'ofis', { command: process.execPath, args: [path.join(__dir, 'approver.js')],
-  env: { OFIS_URL: `http://127.0.0.1:${PORT}`, OFIS_AGENT: 'antigravity', OFIS_PROJECT: p?.id || '', OFIS_ONLY_SHOT: '1', ELECTRON_RUN_AS_NODE: '1' } });
+// aynı klasörde eşzamanlı Antigravity çalıştırmaları dosyayı paylaşır (ilk çalıştırmanın görev kimliği yazılır); sunucu ajanın o an çalışan görevine de bakar
+const agyMcpOn = (dir, p, task, hat) => mountWorkspaceMcp(path.join(dir, '.agents', 'mcp_config.json'), 'ofis', { command: process.execPath, args: [path.join(__dir, 'approver.js')],
+  env: { OFIS_URL: `http://127.0.0.1:${PORT}`, OFIS_AGENT: 'antigravity', OFIS_PROJECT: p?.id || '', OFIS_TASK: task || '', OFIS_HAT: hat || '', OFIS_ONLY_SHOT: '1', ELECTRON_RUN_AS_NODE: '1' } });
 process.on('exit', restoreAllMounts);
 
 // Codex / Antigravity: ofisin onay kutusuna bağlanamazlar (Claude'un --permission-prompt-tool karşılığı yok);
 // bu yüzden kendi sandbox'larında, çalışma klasörüyle sınırlı ve onaysız ("asla sorma") modda çalıştırılırlar.
-function runOther(provider, { agentId, p, prompt, system, phase, cwd, think }) {
+// image: bu çalıştırmada Codex görsel üretebilir (görev "gorsel-uret" yeteneğiyle Codex'e atandı ve hak var); değilse özellik kapatılır, limit boşa gitmez
+function runOther(provider, opts) {
+  if (provider !== 'codex' || !opts.image) return runOtherNow(provider, opts);
+  const run = imgLock.then(async () => {
+    const before = listImages(CODEX_IMG()), r = await runOtherNow(provider, opts), got = collectImages(opts.p, before);
+    if (got.n) {
+      logEv(opts.p, 'codex', 'task', `Codex ${got.n} görsel üretti (bu projede ${opts.p.images}/${imageMax()})${got.copied.length ? '; klasöre alındı: ' + got.copied.join(', ') : ''}`);
+      r.text = (r.text || '') + `\n\n(Ofis notu: bu görevde ${got.n} görsel üretildi${got.copied.length ? `; çalışma klasörüne kopyalanmamış olanlar şuraya alındı: ${got.copied.join(', ')}` : ''}.)`;
+    }
+    return r;
+  });
+  imgLock = run.catch(() => {});
+  return run;
+}
+function runOtherNow(provider, { agentId, p, prompt, system, phase, cwd, think, task, hat, image }) {
   return new Promise(resolve => {
     const cfg = S.settings.providers[provider] || {}, model = safeModel(cfg.model);
     const shot = provider === 'codex' || (provider === 'antigravity' && agyShotAllowed());   // ekran görüntüsü aracı bu çalıştırmada var mı
-    const full = `${system}${cliGuide(provider, { phase, trust: !!cfg.trust, shot })}\n\n---\n${prompt}`;
+    const full = `${system}${cliGuide(provider, { phase, trust: !!cfg.trust, shot, web: !!cfg.web })}\n\n---\n${prompt}`;
     let args, viaStdin = false;
     if (provider === 'codex') {   // https://developers.openai.com/codex/noninteractive
       args = ['exec', '--json', '--skip-git-repo-check', '--ephemeral', '-C', cwd, '-s', phase === 'work' ? 'workspace-write' : 'read-only', '-c', 'approval_policy=never'];
       if (model) args.push('-m', model);
       if (!think) args.push('-c', 'model_reasoning_effort=low');
       // ekran görüntüsü aracı: ofisin MCP sunucusu yalnızca bu çalıştırma için (-c), kullanıcının ~/.codex ayarı değişmez; onay aracı gizlenir
-      const env = { OFIS_URL: `http://127.0.0.1:${PORT}`, OFIS_AGENT: 'codex', OFIS_PROJECT: p?.id || '', OFIS_ONLY_SHOT: '1', ELECTRON_RUN_AS_NODE: '1' };
+      const env = { OFIS_URL: `http://127.0.0.1:${PORT}`, OFIS_AGENT: 'codex', OFIS_PROJECT: p?.id || '', OFIS_TASK: task || '', OFIS_HAT: hat || '', OFIS_ONLY_SHOT: '1', ELECTRON_RUN_AS_NODE: '1' };
       args.push('-c', `mcp_servers.ofis.command=${JSON.stringify(process.execPath)}`, '-c', `mcp_servers.ofis.args=${JSON.stringify([path.join(__dir, 'approver.js')])}`,
-        '-c', `mcp_servers.ofis.env={${Object.entries(env).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(',')}}`, '-c', 'mcp_servers.ofis.tools.screenshot.approval_mode="approve"');
+        '-c', `mcp_servers.ofis.env={${Object.entries(env).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(',')}}`,
+        ...['screenshot', ...OFIS_TEAM_TOOLS].flatMap(n => ['-c', `mcp_servers.ofis.tools.${n}.approval_mode="approve"`]));   // yalnızca ofisin kendi araçları onaysız
+      // web araması (isteğe bağlı, Analiz → CLI → Codex): Codex'in yerleşik arama aracı; sandbox ağı yine kapalı kalır (komutlar internete çıkamaz)
+      if (cfg.web) args.push('-c', 'web_search="live"');
+      // görsel üretimi yalnızca görsel görevinde açık (aksi halde Codex kendi kararıyla görsel üretip limiti harcamasın)
+      args.push('-c', `features.image_generation=${image && phase === 'work' ? 'true' : 'false'}`);
       // Windows: yönetici kurulumu olmadan sandbox (aksi halde salt okunur/çalışma modunda tüm kabuk komutları "blocked by policy" ile reddediliyor ve Codex dosya okuyamıyor)
       if (process.platform === 'win32') args.push('-c', 'windows.sandbox="unelevated"');
       args.push('-'); viaStdin = true;   // istem stdin'den: komut satırına kullanıcı metni girmez
@@ -592,7 +759,7 @@ function runOther(provider, { agentId, p, prompt, system, phase, cwd, think }) {
       if (phase === 'work' && cfg.trust) args.push('--dangerously-skip-permissions');   // komutlara da sormadan izin: sadece sen "tam yetki" açtıysan; yine sandbox içinde
     }
     const acc = newAcc(), parse = provider === 'codex' ? parseCodexLine : parseAgyLine;
-    const mcpOff = provider === 'antigravity' && shot ? agyMcpOn(cwd, p) : null;   // Antigravity: aracı proje klasöründeki .agents/mcp_config.json ile ver, bitince geri al
+    const mcpOff = provider === 'antigravity' && shot ? agyMcpOn(cwd, p, task, hat) : null;   // Antigravity: aracı proje klasöründeki .agents/mcp_config.json ile ver, bitince geri al
     let out = '', err = '', child;
     try { child = spawnBin(BINS[provider], args, { cwd, env: cleanEnv(), windowsHide: true }); }
     catch (e) { mcpOff?.(); return resolve({ text: `Hata: ${PROVIDERS[provider].label} başlatılamadı (${e.message})`, tin: 0, tout: 0, tcache: 0, error: e.message }); }
@@ -609,6 +776,7 @@ function runOther(provider, { agentId, p, prompt, system, phase, cwd, think }) {
         const line = out.slice(0, i); out = out.slice(i + 1); if (!line.trim()) continue;
         let m; try { m = JSON.parse(line); } catch { continue; }
         for (const e of parse(m, acc)) {
+          if (e.kind === 'tool' && toolKind(e.name) === 'write' && p) noteWrite(p, task, e.input?.file_path);
           if (e.kind === 'tool') { const t = activityText(e.name, e.input); status(agentId, 'working', t); emit('activity', { agent: agentId, text: t, tool: e.name, kind: toolKind(e.name) }); logEv(p, agentId, 'tool', t); }
           else if (e.kind === 'text') { if (e.text.trim()) logEv(p, agentId, 'text', e.text); }
           else logEv(p, agentId, e.kind, e.text);
@@ -630,7 +798,9 @@ function runOther(provider, { agentId, p, prompt, system, phase, cwd, think }) {
 }
 
 // phase: 'plan' (araştırma, salt-okunur) | 'work' (çalışma klasöründe üretim) | 'text' (araçsız kısa metin)
-async function ask(p, agentId, prompt, { purpose = 'görev', phase = 'text', model, turns, cat, provider, extraTools = [] } = {}) {
+// task: çalışan görevin kimliği (dosya çakışması ve ekip araçları için); nogate: CLI kapısını beklemeden çalış (team_ask: soran ajan zaten
+// bir kapı yerini tutuyor; sıra beklerse paralel=1'de kilitlenir)
+async function ask(p, agentId, prompt, { purpose = 'görev', phase = 'text', model, turns, cat, provider, extraTools = [], task, nogate = false, image = false } = {}) {
   const a = S.hats[agentId];   // şapka: yönerge, araçlar, beceriler, dersler
   const dir = p ? wsDir(p) : WORK;
   const tools = phase === 'text' ? '' : phase === 'plan' ? `${READ},${WEB}` : [...new Set([...a.tools.split(','), ...extraTools])].filter(Boolean).join(',');
@@ -655,18 +825,20 @@ async function ask(p, agentId, prompt, { purpose = 'görev', phase = 'text', mod
     (phase !== 'text' && S.shared.prefs.length ? `\nKULLANICI TERCİHLERİ (hep uy):\n${S.shared.prefs.slice(-10).map(x => '- ' + x).join('\n')}` : '') +
     (phase === 'work' ? `\nÇalışma klasörün: ${dir} — üretilen tüm dosyaları buraya yaz. Yanıtında dosya içeriğini TEKRARLAMA; sadece ne yaptığını 5-8 satırda anlat.` : '') +
     (phase === 'plan' ? `\nBu aşamada hiçbir dosyayı değiştirme; sadece araştır ve planla.` : '') +
-    (phase !== 'text' ? `\nGÜVENLİK: Sadece çalışma klasöründeki dosyalarla çalış. Kullanıcı izni olmadan bu klasörün dışındaki hiçbir dosyayı/klasörü okuma, yazma veya listeleme; gerekiyorsa izin iste. Paket kurmadan önce gerçekten gerekli mi düşün, yerleşik yolları tercih et.` : '');
+    (phase !== 'text' ? `\nGÜVENLİK: Sadece çalışma klasöründeki dosyalarla çalış. Kullanıcı izni olmadan bu klasörün dışındaki hiçbir dosyayı/klasörü okuma, yazma veya listeleme; gerekiyorsa izin iste. Paket kurmadan önce gerçekten gerekli mi düşün, yerleşik yolları tercih et.` : '') +
+    (phase !== 'text' ? memoryText(agentId, a, prompt) + (prov !== 'antigravity' || (agyShotAllowed() && agyTeamAllowed()) ? teamGuide(p, agentId, phase === 'work') : '') : '');
   const cmodel = S.agents.claude.model || 'sonnet';
   const cfg = phase === 'text' ? { tools: '', allow: [], turns: 1, mode: 'default', model: model || (agentId === 'ceo' ? cmodel : 'haiku') }
-    : phase === 'plan' ? { tools, allow: [...WEB.split(','), SELF_SHOT], turns: turns || a.turns, mode: 'default', model: model || cmodel }
-    : { tools, allow: [...a.tools.split(',').filter(t => /^(WebSearch|WebFetch)$/.test(t)), SELF_SHOT], turns: turns || a.turns, mode: 'acceptEdits', model: model || cmodel };
+    : phase === 'plan' ? { tools, allow: [...WEB.split(','), SELF_SHOT, ...TEAM_TOOLS], turns: turns || a.turns, mode: 'default', model: model || cmodel }
+    : { tools, allow: [...a.tools.split(',').filter(t => /^(WebSearch|WebFetch)$/.test(t)), SELF_SHOT, ...TEAM_TOOLS, TEAM_REQ], turns: turns || a.turns, mode: 'acceptEdits', model: model || cmodel };
   const sk = phase === 'text' ? [] : pickSkills(agentId, a, prompt);
   const fullSystem = system + skillsPrompt(sk);
   const t0 = Date.now(); status(prov, 'working', purpose, agentId);
   const demo = FORCE_DEMO;
-  const res = await gate(prov, async () => demo ? (await demoWait(prov, phase), mockRun({ system: fullSystem, prompt }))
-    : prov === 'claude' ? runClaude({ agentId: prov, p, prompt, system: fullSystem, cwd: dir, think: phase !== 'text' && a.think !== false, ...cfg })
-    : runOther(prov, { agentId: prov, p, prompt, system: fullSystem, phase, cwd: dir, think: a.think !== false }));
+  const run = async () => demo ? (await demoWait(prov, phase), mockRun({ system: fullSystem, prompt }))
+    : prov === 'claude' ? runClaude({ agentId: prov, p, prompt, system: fullSystem, cwd: dir, think: phase !== 'text' && a.think !== false, task, hat: agentId, ...cfg })
+    : runOther(prov, { agentId: prov, p, prompt, system: fullSystem, phase, cwd: dir, think: a.think !== false, task, hat: agentId, image: image && prov === 'codex' && imagegenOn() && imageLeft(p) > 0 });
+  const res = nogate ? await run() : await gate(prov, run);
   if (prov !== 'claude') cfg.model = prov + (safeModel(S.settings.providers[prov]?.model) ? ':' + S.settings.providers[prov].model : '');
   status(prov, res.error ? (res.limit ? 'limit' : 'error') : 'idle', res.error ? cut(res.error, 60) : '');
   if (res.error) logEv(p, prov, 'error', res.error);
@@ -675,12 +847,15 @@ async function ask(p, agentId, prompt, { purpose = 'görev', phase = 'text', mod
   S.requests.push(req); if (S.requests.length > 300) S.requests.splice(0, S.requests.length - 300);
   const now0 = new Date(), day = now0.getFullYear() + '-' + String(now0.getMonth() + 1).padStart(2, '0') + '-' + String(now0.getDate()).padStart(2, '0'), dd = (S.daily[day] ||= { runs: 0, tin: 0, tout: 0, tcache: 0 });
   dd.runs++; dd.tin += res.tin || 0; dd.tout += res.tout || 0; dd.tcache += res.tcache || 0;
+  const used = { tin: res.tin, tout: res.tout, tcache: res.tcache };   // su ayak izi için ajan (CLI) ve proje bazında token
+  (dd.by ||= {})[prov] = addTokens(dd.by[prov], used);
+  if (p) p.tok = addTokens(p.tok, used);
   if (p) {
     p.spent = (p.spent || 0) + (res.tin || 0) + (res.tout || 0);
     if (p.budget && !p.warned && p.spent >= 0.8 * p.budget) { p.warned = true; post(p, 'ceo', 'user', `Token bütçesinin %80'i kullanıldı (${p.spent}/${p.budget}).`, { budgetWarn: 1 }); emit('notify', { kind: 'budget', text: 'Token bütçesinin %80\'i doldu' }); }
     emit('budget', { id: p.id, spent: p.spent, budget: p.budget || 0 });
   }
-  save(); emit('request', reqMeta(req));
+  save(); emit('request', reqMeta(req)); emit('water', { ...waterState(), project: p ? { id: p.id, water: waterOf(p.tok) } : null });
   return req;
 }
 
@@ -706,7 +881,13 @@ async function runTask(p, t, brief, deps, done) {
   const base = `GÖREV: ${t.instruction}${t.deliverable ? `\nBEKLENEN ÇIKTI: ${t.deliverable}` : ''}\nPROJE TANIMI: ${cut(brief, 1200)}` + visionText(p) + (p.notes ? `\nPROJE NOTLARI: ${cut(p.notes, 800)}` : '') +
     (deps.length ? '\nÖNCEKİ ÇIKTILAR (özet; ayrıntı için çalışma klasöründeki dosyalara bak):\n' + deps.map(d => `[${d.agent}:${S.hats[d.agent].title}] ${d.summary}`).join('\n') : '') +
     (mates.length ? '\nEKİP (seninle paralel çalışanlar): ' + mates.map(x => `${S.hats[x.agent]?.title || x.agent} → ${x.deliverable || cut(x.instruction, 60)}`).join('; ') + '\nOnların dosyalarına yazma; ortak bir karar gerekiyorsa varsayımını kendi çıktında açıkça belirt.' : '');
-  const caps = t.caps || [], capText = capabilityPrompt(caps, { tool: ASSET_TOOL });
+  // görsel üretimi: yalnızca görev Codex'te çalışıyor, ayar açık ve projede hak kaldıysa; aksi halde talimat verilmez, SVG/piksel sanata dönülür
+  const caps = t.caps || [], wantsImg = caps.includes('gorsel-uret'), imgOk = wantsImg && cli === 'codex' && imagegenOn() && imageLeft(p) > 0;
+  const imgWhy = !wantsImg || imgOk ? '' : !imagegenOn() ? 'Codex görsel üretimi kapalı ya da kullanılamıyor' : cli !== 'codex' ? 'görev Codex dışında bir ajanda çalışıyor' : `bu projedeki görsel hakkı (${imageMax()}) doldu`;
+  const capCtx = { tool: ASSET_TOOL, imgDir: CODEX_IMG(), left: imageLeft(p), imagegen: imgOk };
+  const capText = capabilityPrompt(caps, capCtx) + (imgWhy ? `\nGÖRSEL ÜRETİMİ BU GÖREVDE YOK (${imgWhy}): gerekli görselleri piksel sanat (asset aracı) ya da SVG ile yap.` : '');
+  if (imgWhy) logEv(p, cli, 'task', 'Görsel üretimi kullanılamadı: ' + imgWhy);
+  const capNoImg = capabilityPrompt(caps, { ...capCtx, imagegen: false }) + (wantsImg ? '\nGÖRSEL ÜRETİMİ BU GÖREVDE YOK (Codex yerine Claude Code çalışıyor): gerekli görselleri piksel sanat (asset aracı) ya da SVG ile yap.' : '');
   const myCrit = (p.criteria || []).filter(c => (t.criteria || []).includes(c.id));
   const critText = myCrit.length && !isAudit ? '\nBU GÖREVİN KARŞILAMASI GEREKEN KABUL ÖLÇÜTLERİ (teslimden önce her birini kendin kontrol et):\n' + myCrit.map(c => `- ${c.id}: ${c.olcut}`).join('\n') : '';
   const rubric = isAudit && toReview.length ? `\n\nKALİTE DEĞERLENDİRMESİ: Çalışma klasöründeki dosyaları OKU ve ajan özetlerini karşılaştır. Değerlendirilecek ajanlar: ${toReview.join(',')}\nHer ajan için 1-10 puan (1-3 kullanılamaz, 4-6 kısmen, 7-8 iyi, 9-10 kusursuz): "dogruluk" (hatasız/doğru mu), "tamlik" (istenenin tamamı var mı), "talimat" (göreve ve kullanıcı isteğine uyum). Somut kanıt göstermeden 8'in üstünü verme.\n` +
@@ -715,8 +896,13 @@ async function runTask(p, t, brief, deps, done) {
     `Yanıtının EN SON satırı SADECE şu JSON olsun: {"<ajan anahtarı>":{"dogruluk":n,"tamlik":n,"talimat":n,"not":"somut kanıt, en fazla 12 kelime"},"duzeltmeler":[{"ajan":"<ajan anahtarı>","is":"ne, nerede, nasıl düzeltilecek"}]}` : '';
   const tail = `\n\nSonda "---ÖZET---" yazıp 40 kelimelik özet ekle.` + rubric;
   const askLine = isAudit ? '' : `\nSORU_SERBEST: Sadece işini ENGELLEYEN bir bilgi eksiğin varsa hiçbir araç kullanmadan yanıtın TEK satır olsun: "SORU@<${roster}>: kısa soru". Aksi halde soru sorma, işi yap.`;
-  const bt = (p.board || []).find(x => x.id === t.id); if (bt && !isAudit) bt.snap = snapshot(p, t.id); if (bt) { bt.status = 'çalışıyor'; bt.cli = cli; bt.startedAt = Date.now(); save(); emit('project', p); }
+  const bt = (p.board || []).find(x => x.id === t.id); if (bt && !isAudit) bt.snap = await snapshot(p, t.id); if (bt) { bt.status = 'çalışıyor'; bt.cli = cli; bt.startedAt = Date.now(); save(); emit('project', p); }
   logEv(p, cli, 'task', 'Görev başladı: ' + cut(t.instruction, 110));
+  const lt = { id: t.id, p, hat: t.agent, cli, files: new Set(), warned: new Set() }; liveTasks.set(liveKey(p, t.id), lt);
+  try { await runTaskBody(); } finally { if (liveTasks.get(liveKey(p, t.id)) === lt) liveTasks.delete(liveKey(p, t.id)); }
+  async function runTaskBody() {
+  const mail = isAudit ? [] : inbox(p, t.agent);   // görev başlarken gelen kutusu isteme girer
+  const mailIn = mail.length ? `\nGELEN KUTUN (ekip arkadaşlarının sana bıraktığı mesajlar):\n${mailText(mail)}` : '';
   const m = { agent: t.agent, deliverable: t.deliverable, turns: 0, maxTurns: 0, ms: 0, error: false, subtype: 'success', questions: 0, denials0: (p.denials || {})[cli] || 0 };
   const add = r => { m.turns += r.turns || 0; m.maxTurns += r.maxTurns || 0; m.ms += r.ms; if (r.error) m.error = true; if (r.subtype && r.subtype !== 'success') m.subtype = r.subtype; if (r.provider) m.provider = r.provider; };
   const cat = m.cat = categoryOf(t.agent, t.instruction, t.deliverable);
@@ -726,13 +912,14 @@ async function runTask(p, t, brief, deps, done) {
   const prior = t.kind === 'düzeltme' ? Object.values(done).filter(d => d.agent === t.agent && !d.fix && d.body).map(d => cut(d.body, 900)).join('\n---\n') : '';
   const priorText = prior ? `\nÖNCEKİ RAPORUN (bu işi sen yaptın; dosyaları baştan keşfetme, yalnızca kararla ilgili yerleri aç ve düzenle):\n${cut(prior, 1800)}` : '';
   const turns = t.role === 'yapimci' ? Math.max(S.hats[t.agent].turns || 24, 60) : undefined;   // tüm ürünü yazan yapımcıya daha çok adım (ekran görüntüsüne bakıp düzeltmek de adım harcar)
-  let r = await ask(p, t.agent, base + builderText + critText + capText + vText + priorText + askLine + tail, { purpose: cut(t.instruction, 40), phase: 'work', cat, extraTools: xt, turns, provider: cli }); add(r);   // yapımcının düzeltmeleri aynı CLI'de kalır
+  let r = await ask(p, t.agent, base + builderText + critText + capText + vText + priorText + mailIn + askLine + tail, { purpose: cut(t.instruction, 40), phase: 'work', cat, extraTools: xt, turns, provider: cli, task: t.id, image: imgOk }); add(r);   // yapımcının düzeltmeleri aynı CLI'de kalır
   if (r.error && r.provider && r.provider !== 'claude' && r.subtype !== 'budget' && !p.cancelled && provUsable('claude')) {
     // başka CLI başarısız oldu: bunu öğren (düşük puan) ve görevi Claude Code ile bir kez daha dene
     if (!r.userStop) recordResult(S.routing, r.provider, cat, 1, { failed: true }); m.fallback = r.provider;
     post(p, t.agent, 'ceo', r.userStop ? `${PROVIDERS[r.provider].label} bağlantısı kesildi; göreve Claude Code ile devam ediyorum.` : `${PROVIDERS[r.provider].label} bu görevde hata verdi (${cut(r.error, 120)}). Claude Code ile yeniden deniyorum.`, { cli: r.provider });
     m.error = false; m.subtype = 'success';
-    r = await ask(p, t.agent, base + capText + askLine + tail, { purpose: cut(t.instruction, 40), phase: 'work', cat, provider: 'claude', extraTools: xt }); add(r);
+    lt.cli = 'claude';
+    r = await ask(p, t.agent, base + capNoImg + mailIn + askLine + tail, { purpose: cut(t.instruction, 40), phase: 'work', cat, provider: 'claude', extraTools: xt, task: t.id }); add(r);
   }
   if (bt) { bt.provider = m.provider; bt.cat = cat; bt.skills = r.skills || []; }
   const q = r.response.match(/^SORU@(\w+):\s*(.+)$/m);
@@ -741,13 +928,14 @@ async function runTask(p, t, brief, deps, done) {
     post(p, t.agent, to, 'Soru: ' + q[2], { reqId: r.id, cli: m.provider });
     const a = await ask(p, to, `SORU/CEVAP_ISTEGI\n${S.hats[t.agent].title} sana soruyor (görev: ${cut(t.instruction, 150)}): ${q[2]}\nEn fazla 50 kelimeyle yanıtla.`, { purpose: 'soruya yanıt', phase: 'text', model: S.hats[to].model });
     post(p, to, t.agent, a.response, { reqId: a.id });
-    r = await ask(p, t.agent, base + capText + `\nSORU-CEVAP: ${q[2]} → ${cut(a.response, 400)}` + tail, { purpose: cut(t.instruction, 40), phase: 'work', cat, provider: m.provider, extraTools: xt }); add(r);
+    const onCodex = m.provider === 'codex';
+    r = await ask(p, t.agent, base + (onCodex ? capText : capNoImg) + `\nSORU-CEVAP: ${q[2]} → ${cut(a.response, 400)}` + tail, { purpose: cut(t.instruction, 40), phase: 'work', cat, provider: m.provider, extraTools: xt, task: t.id, image: imgOk && onCodex }); add(r);
   }
   let fixes = null, accept = null, newDecisions = null, tri = [];
   const parse = r => {
     const sr = extractSelfReview(r.response); let text = sr.text;
     if (t.role === 'yapimci') { const ds = decisionsListOf(text); if (ds.length) newDecisions = ds; tri = triageOf(text); text = stripSections(text); }
-    if (sr.review && !m.error) addLesson(S.hats[t.agent], sr.review, 'oz');
+    if (sr.review && !m.error) learn(t.agent, sr.review, 'oz');
     if (isAudit) { const rb = rubricOf({ response: text }); if (rb) { text = rb.rest; fixes = fixesOf(rb.json); accept = acceptOf(rb.json, p.criteria || []); for (const [k, v] of Object.entries(accept)) (p.acceptance ||= {})[k] = { ...v, ts: Date.now() }; for (const [k, v] of Object.entries(rb.json)) if (S.hats[k.toLowerCase()] && v && typeof v === 'object' && !Array.isArray(v)) (p.quality ||= {})[k.toLowerCase()] = v; } }
     return splitSummary(text);
   };
@@ -769,21 +957,40 @@ async function runTask(p, t, brief, deps, done) {
       if (rv.karar === 'revize' && !p.cancelled) {
         if (bt) { bt.phase = 'düzeltme'; save(); emit('project', p); }
         logEv(p, m.provider || cli, 'task', `Akran önerilerini uyguluyor (${rv.oneriler.length})`);
-        const r2 = await ask(p, t.agent, base + capText + `\nAZ ÖNCEKİ RAPORUN (dosyaları baştan keşfetme, yalnızca önerilerle ilgili yerleri aç):\n${cut(body, 1200)}` + `\nAKRAN GERİ BİLDİRİMİ — ${S.hats[rev].title} (${S.agents[cliOf(p, rev)]?.name || rev}) çıktını inceledi ve şunları öneriyor:\n` + rv.oneriler.map(x => '- ' + x).join('\n') +
+        const r2 = await ask(p, t.agent, base + (m.provider === 'codex' ? capText : capNoImg) + `\nAZ ÖNCEKİ RAPORUN (dosyaları baştan keşfetme, yalnızca önerilerle ilgili yerleri aç):\n${cut(body, 1200)}` + `\nAKRAN GERİ BİLDİRİMİ — ${S.hats[rev].title} (${S.agents[cliOf(p, rev)]?.name || rev}) çıktını inceledi ve şunları öneriyor:\n` + rv.oneriler.map(x => '- ' + x).join('\n') +
           `\nBu önerileri mevcut dosyalarında UYGULA (baştan yazma, düzenle). Katılmadığın bir öneri varsa uygulamadan tek cümleyle gerekçesini yaz.` + tail,
-          { purpose: 'akran önerilerini uyguluyor', phase: 'work', cat, provider: m.provider, extraTools: xt }); add(r2);
+          { purpose: 'akran önerilerini uyguluyor', phase: 'work', cat, provider: m.provider, extraTools: xt, task: t.id, image: imgOk && m.provider === 'codex' }); add(r2);
         if (!r2.error) { r = r2; ({ body, summary } = parse(r2)); if (bt) bt.review.applied = true; }
       }
     }
     if (bt) { delete bt.phase; save(); emit('project', p); }
   }
   m.denials = ((p.denials || {})[cli] || 0) - m.denials0; m.delivered = m.error ? 0 : deliveryRatio(p, t.deliverable);
+  // görevin değişiklikleri: kayıt noktaları arası fark; Codex/Antigravity onaysız çalıştığı için riskli değişiklikler sana gösterilir
+  if (bt && !isAudit && SHA_RE.test(bt.snap || '')) {
+    const end = await snapshot(p, t.id + '-son'), au = await auditChanges(p, bt.snap, end);
+    if (au) {
+      bt.changes = { n: au.n, summary: au.summary, files: au.files.map(c => c.status + ' ' + c.file), flags: au.flags };
+      const prov = m.provider || cli, unattended = prov !== 'claude';
+      if (au.n) logEv(p, prov, 'task', 'Değişiklikler: ' + au.summary);
+      if (au.flags.length) {
+        for (const f of au.flags) logEv(p, prov, 'error', `Riskli değişiklik (${f.level}): ${f.file} — ${f.why}`);
+        if (unattended) {
+          post(p, 'ceo', 'user', `⚠ ${PROVIDERS[prov].label} onay sormadan çalıştı; bu adım sürerken çalışma klasöründe şu riskli değişiklikler oldu, kontrol et:\n` + au.flags.map(f => `• ${f.level === 'yuksek' ? 'YÜKSEK' : 'ORTA'} — ${f.file}: ${f.why}`).join('\n') +
+            `\nİstemiyorsan panoda bu adımda "↶ Bu adımdan önceye dön" ile geri alabilirsin.`, { risk: 1 });
+          emit('notify', { kind: 'ask', text: `${PROVIDERS[prov].label}: riskli değişiklik` });
+        }
+      }
+    }
+  }
   done[t.id] = { id: t.id, agent: t.agent, summary, body, metrics: m, fix: !!t.kind, fixes, accept, triage: tri };
   if (newDecisions) { p.decisions = newDecisions; post(p, t.agent, 'all', 'Verdiğim kararlar (ekip bunlara göre değerlendirecek):\n' + newDecisions.map(x => '• ' + x).join('\n'), { meet: 1, cli: m.provider || cli }); }
   if (bt && bt.status !== 'iptal') { bt.status = m.error ? 'hata' : 'bitti'; bt.endedAt = Date.now(); bt.summary = summary; bt.metrics = { ...m }; bt.turns = m.turns; save(); emit('project', p); }
   if (!m.error) status(m.provider || cli, 'done', 'tamamlandı', t.agent);
   logEv(p, m.provider || cli, m.error ? 'error' : 'task', (m.error ? 'Görev hata ile bitti: ' : 'Görev tamamlandı: ') + cut(summary, 110));
   post(p, t.agent, 'ceo', body, { reqId: r.id, summary, cli: m.provider || cli });
+  if (t.from && S.hats[t.from]) sendMail(p, t.agent, t.from, `İsteğin (${t.id}) ${m.error ? 'hata ile bitti' : 'tamamlandı'}: ${cut(summary, 300)}`);   // team_request ile isteyene haber
+  }
 }
 
 // Puan = Teslimat %40 + Kalite (denetçi rubriği) %35 + Verimlilik %15 + Uyum %10 (eksik ölçüt varsa ağırlıklar yeniden dağıtılır)
@@ -807,7 +1014,7 @@ function scoreProject(p, done) {
     (p.scores ||= []).push({ from: 'metrik', to: d.agent, score, why });
     const bt = (p.board || []).find(x => x.id === d.id); if (bt) bt.score = score;   // tasarruf hesabı: sadece kabul edilen işler
     if (d.metrics.provider && d.metrics.cat) recordResult(S.routing, d.metrics.provider, d.metrics.cat, score, { failed: !!d.metrics.error });   // hangi CLI bu tür işte ne kadar iyi
-    for (const [src, l] of metricLessons(parts, d.metrics, (p.quality || {})[d.agent])) addLesson(ag, l, src);
+    for (const [src, l] of metricLessons(parts, d.metrics, (p.quality || {})[d.agent])) learn(d.agent, l, src);
     const lv = levelOf(me); if (lv.index > lv0) post(p, d.agent, 'user', `Seviye atladım: ${lv.name}. (${lv.tasks} görev, ortalama ${lv.avg.toFixed(1)}/10)`, { levelUp: lv.key, cli: d.metrics.provider });
     lines.push(`${me.name} · ${ag.title}: ${score.toFixed(1)}/10 — ${why}`);
   }
@@ -834,7 +1041,7 @@ async function handleUser(p, text, { revise } = {}) {
   const brief = revise ? p.brief : text; if (!revise) p.brief = [p.brief, text].filter(Boolean).join('\n').slice(-3000);
   const ctx = (p.summary ? `\nPROJENİN ŞU ANKİ DURUMU (önceki turlar): ${p.summary}` : '') + (p.notes ? `\nPROJE NOTLARI (kullanıcı): ${cut(p.notes, 800)}` : '');
   const files = listFiles(wsDir(p)); const fctx = files.length ? `\nÇALIŞMA KLASÖRÜNDEKİ DOSYALAR: ${files.slice(0, 25).join(', ')}` : '';
-  const planReq = await ask(p, 'ceo', `PLAN_JSON\nKullanıcının proje tanımı/isteği: """${revise ? p.brief : text}"""${revise ? `\nKULLANICININ PLAN HAKKINDAKİ DÜZELTMESİ: """${revise}"""` : ''}${ctx}${fctx}\nŞAPKALAR (görev rolleri, task.agent): ${roster}\nAJANLAR (bu ofisin üyeleri, task.kim — her göreve işe en uygun ajanı ata): ${crew}${catalogPrompt((revise ? p.brief : text) + ' ' + (revise || ''), Object.keys(S.hats))}\n` +
+  const planReq = await ask(p, 'ceo', `PLAN_JSON\nKullanıcının proje tanımı/isteği: """${revise ? p.brief : text}"""${revise ? `\nKULLANICININ PLAN HAKKINDAKİ DÜZELTMESİ: """${revise}"""` : ''}${ctx}${fctx}\nŞAPKALAR (görev rolleri, task.agent): ${roster}\nAJANLAR (bu ofisin üyeleri, task.kim — her göreve işe en uygun ajanı ata): ${crew}${catalogPrompt((revise ? p.brief : text) + ' ' + (revise || ''), Object.keys(S.hats), { imagegen: imagegenOn() && officeOf(p).members.includes('codex') && imageLeft(p) > 0, max: imageLeft(p) })}\n` +
     `Önce gerekiyorsa kısa bir araştırma yap (en fazla 3 web araması), sonra planı çıkar.\n` +
     `Yanıtın SADECE JSON olsun: {"reply":"kullanıcıya 2-3 cümle: neyi anladın, nasıl ilerleyeceksin","vizyon":{"amac":"ürün kimin hangi sorununu çözecek, 1 cümle","kitle":"birincil kullanıcılar","basari":"bitmiş ve başarılı sayılması için ölçülebilir ölçüt","kapsam":"bu turda var olacaklar / olmayacaklar","tarz":"YARATICI YÖN: ruh hali; adlandırılmış palet (hex); font çifti (Google Fonts adıyla); yerleşim fikri; konunun dünyasından 3 görsel motif; kaçınılacaklar","yapi":"sayfa/ekran yapısı ve bölümleri sırasıyla"},"kabul":[{"id":"K1","olcut":"gözlemlenebilir, kontrol edilebilir ölçüt"}],"research":["en fazla 5 kısa bulgu"],"tasks":[{"id":"t1","agent":"<şapka anahtarı>","kim":"<ajan anahtarı>","instruction":"net kısa görev","needs":["önceki görev id"],"deliverable":"çıktı dosyası adı","yetenekler":["gerekiyorsa yetenek id"],"kriterler":["bu görevin karşıladığı kabul ölçütü id'leri"]}],"needs_approval":["çalışırken izin isteyebilecek kurulum/indirme/komutlar, varsa"],"questions":["kritik eksik bilgi varsa en fazla 2 soru"]}\n` +
     `BÜTÜNCÜL DÜŞÜN: Projeyi sadece ön yüz/görsel iş olarak değil, kullanıcıya değer üreten BÜTÜN bir ürün olarak ele al: amaç ve kitle (araştırma), içerik ve dil (metin), deneyim ve görsel (tasarım), teknik altyapı (kod, veri, çalıştırma ve yayına alma), kalite (denetim). İşin gerektirdiği her uzmanlığı kullan, gerektirmeyeni ekleme. Vizyonu tüm ekip görecek ve ekip sonda ürünü bu vizyona göre birlikte değerlendirecek.\n` +
@@ -844,7 +1051,7 @@ async function handleUser(p, text, { revise } = {}) {
     { purpose: 'araştırma ve plan', phase: 'plan' });
   let plan; try { plan = JSON.parse(planReq.response.match(/\{[\s\S]*\}/)[0]); } catch { plan = { reply: planReq.response, tasks: [] }; }
   const ceoCaps = (plan.tasks || []).some(t => Array.isArray(t.yetenekler) && t.yetenekler.length);   // CEO yetenek atadıysa karar onundur
-  const tasks = (plan.tasks || []).filter(t => S.hats[t.agent] && !S.hats[t.agent].external && t.agent !== 'ceo').slice(0, 6).map(t => ({ ...t, caps: capsForTask(t, t.agent, `${p.brief} ${text || ""}`, { auto: !ceoCaps }) }));
+  const tasks = (plan.tasks || []).filter(t => S.hats[t.agent] && !S.hats[t.agent].external && t.agent !== 'ceo').slice(0, 6).map(t => ({ ...t, caps: capsForTask(t, t.agent, `${p.brief} ${text || ""}`, { auto: !ceoCaps, imagegen: imagegenOn() }) }));
   for (const t of tasks) t.cli = assignCli(p, { ...t, cli: String(t.kim || '').toLowerCase() });   // liderin seçimi ofis üyesiyse ve işe uygunsa geçerli
   const qs = (plan.questions || []).filter(Boolean);
   if (!tasks.length) { post(p, 'ceo', 'user', [plan.reply || 'Tamam.', ...qs.map(q => '• ' + q)].join('\n'), { reqId: planReq.id }); save(); emit('project', p); return; }
@@ -878,10 +1085,33 @@ function reviewerFor(t, tasks) {
   return !tasks.some(x => x.agent === 'auditor') && S.hats.auditor ? 'auditor' : null;
 }
 
-// ---------- Anlık görüntü ve geri alma ----------
-// Görev başlamadan önce çalışma klasörünün kopyası uygulamanın veri klasörüne alınır. Geri alınca o andaki hâline dönülür;
-// sonradan oluşan dosyalar SİLİNMEZ, anlık görüntünün "geri-alinanlar" klasörüne taşınır.
-function snapshot(p, tag) {
+// ---------- Kayıt noktaları ve geri alma ----------
+// Görev başlamadan önce çalışma klasörünün hâli, uygulamanın veri klasöründeki gölge git deposuna kaydedilir (lib/checkpoints.mjs):
+// boyut sınırı yok, kullanıcının kendi .git'ine dokunulmaz. Git yoksa eski yönteme (50 MB'a kadar kopya) düşülür.
+// Geri alınca o andaki hâline dönülür; sonradan oluşan dosyalar SİLİNMEZ, "geri-alinanlar" klasörüne taşınır.
+const repoOf = p => path.join(SNAPS, p.id, 'repo.git');
+async function snapshot(p, tag) {
+  if (await gitAvailable()) {
+    try { return await checkpoint(repoOf(p), wsDir(p), String(tag)); }
+    catch (e) { logEv(p, 'ceo', 'error', 'Kayıt noktası alınamadı (git): ' + e.message); }
+  }
+  return copySnapshot(p, tag);
+}
+async function restoreSnapshot(p, id) {
+  if (!SHA_RE.test(id || '')) return restoreCopy(p, id);
+  try { return { ...(await gitRestore(repoOf(p), wsDir(p), id, path.join(SNAPS, p.id, 'geri-alinanlar', Date.now().toString(36)))), ts: null }; }
+  catch (e) { throw new Error(/bulunamadı/.test(e.message) ? 'Kayıt noktası bulunamadı' : 'Geri alınamadı: ' + e.message); }
+}
+// görevin yaptığı değişiklikler (iki kayıt noktası arası) + onaysız çalışan CLI'ler için risk denetimi
+async function auditChanges(p, from, to) {
+  if (!SHA_RE.test(from || '') || !SHA_RE.test(to || '')) return null;
+  try {
+    const repo = repoOf(p), dir = wsDir(p), ch = await gitChanges(repo, dir, from, to);
+    const pk = ch.some(c => c.file === 'package.json') ? { pkgBefore: await fileAt(repo, dir, from, 'package.json'), pkgAfter: await fileAt(repo, dir, to, 'package.json') } : {};
+    return { n: ch.length, summary: changeSummary(ch), files: ch.slice(0, 40), flags: riskyChanges(ch, pk) };
+  } catch (e) { logEv(p, 'ceo', 'error', 'Değişiklik listesi okunamadı: ' + e.message); return null; }
+}
+function copySnapshot(p, tag) {
   const dir = wsDir(p), files = walk(dir, 3000); let size = 0;
   for (const f of files) { try { size += fs.statSync(f).size; } catch {} if (size > SNAP_MAX_BYTES) { logEv(p, 'ceo', 'task', 'Anlık görüntü alınmadı: çalışma klasörü 50 MB\'tan büyük'); return null; } }
   const id = `${Date.now().toString(36)}-${String(tag).replace(/[^\w-]/g, '')}`, to = path.join(SNAPS, p.id, id);
@@ -889,14 +1119,14 @@ function snapshot(p, tag) {
     for (const f of files) { const r = path.relative(dir, f), d = path.join(to, 'files', r); fs.mkdirSync(path.dirname(d), { recursive: true }); fs.copyFileSync(f, d); }
     fs.mkdirSync(to, { recursive: true }); fs.writeFileSync(path.join(to, 'meta.json'), JSON.stringify({ id, tag, ts: Date.now(), files: files.map(f => path.relative(dir, f).replace(/\\/g, '/')), size }));
   } catch (e) { logEv(p, 'ceo', 'error', 'Anlık görüntü alınamadı: ' + e.message); return null; }
-  const all = fs.readdirSync(path.join(SNAPS, p.id)).sort();   // en eski görüntüler silinir (yalnızca uygulamanın kendi kopyaları)
+  const all = fs.readdirSync(path.join(SNAPS, p.id)).filter(x => fs.existsSync(path.join(SNAPS, p.id, x, 'meta.json'))).sort();   // en eski görüntüler silinir (yalnızca uygulamanın kendi kopyaları; gölge git deposu değil)
   for (const old of all.slice(0, Math.max(0, all.length - SNAP_KEEP))) fs.rmSync(path.join(SNAPS, p.id, old), { recursive: true, force: true });
   return id;
 }
-function restoreSnapshot(p, id) {
+function restoreCopy(p, id) {
   if (!/^[\w-]+$/.test(id || '')) throw new Error('geçersiz anlık görüntü');
   const from = path.join(SNAPS, p.id, id); let meta; try { meta = JSON.parse(fs.readFileSync(path.join(from, 'meta.json'), 'utf8')); } catch { throw new Error('Anlık görüntü bulunamadı (eskiler otomatik silinir)'); }
-  const before = snapshot(p, 'geri-almadan-once');   // geri almanın kendisi de geri alınabilsin
+  const before = copySnapshot(p, 'geri-almadan-once');   // geri almanın kendisi de geri alınabilsin
   const dir = wsDir(p), keep = new Set(meta.files.map(x => x.toLowerCase())), moved = [], trash = path.join(from, 'geri-alinanlar', Date.now().toString(36));
   for (const f of walk(dir, 3000)) { const r = path.relative(dir, f).replace(/\\/g, '/'); if (keep.has(r.toLowerCase())) continue; const d = path.join(trash, r); fs.mkdirSync(path.dirname(d), { recursive: true }); fs.renameSync(f, d); moved.push(r); }
   for (const r of meta.files) { const d = path.join(dir, r); fs.mkdirSync(path.dirname(d), { recursive: true }); fs.copyFileSync(path.join(from, 'files', r), d); }
@@ -1208,7 +1438,7 @@ async function executePlan(p, { resume = false } = {}) {
     p.interrupted = false; p.cancelled = false;
   } else {
     const plan = p.pendingPlan; if (!plan) return; p.pendingPlan = null; tasks = plan.tasks; if (plan.vision) p.vision = plan.vision; p.criteria = plan.criteria || []; p.acceptance = {};
-    for (const t of tasks) t.caps ||= capsForTask(t, t.agent, p.brief);
+    for (const t of tasks) t.caps ||= capsForTask(t, t.agent, p.brief, { imagegen: imagegenOn() });
     if (!plan.mode) { const o = productize(tasks, S.hats); tasks = o.tasks; plan.mode = o.mode; }
     p.mode = plan.mode; p.decisions = []; p.loop = null; p.direction = null;
     for (const t of tasks) t.cli = assignCli(p, t);
@@ -1229,9 +1459,14 @@ async function executePlan(p, { resume = false } = {}) {
     if (t.role === 'yapimci' && !t.kind && exploreOn() && !p.direction && !p.cancelled) await exploreDirections(p, t, deps);
     await runTask(p, t, brief, deps, done);
   };
+  // team_request ile çalışırken eklenen işler: hemen paralel başlar; rapor ve puanlamadan önce hepsi beklenir
+  const extraLive = new Set();
+  runCtx.set(p.id, { reqs: 0, spawn: t => { const pr = runOne(t).catch(e => logEv(p, t.agent, 'error', 'İstek görevi: ' + e.message)).finally(() => extraLive.delete(pr)); extraLive.add(pr); tasks.push(t); } });
+  const drain = async () => { while (extraLive.size) await Promise.allSettled([...extraLive]); };
   try {
     await runDag(p, tasks, done, runOne);
-    if (p.mode === 'urun' && rounds) await buildLoop(p, done, rounds, runOne);
+    await drain();
+    if (p.mode === 'urun' && rounds) { await buildLoop(p, done, rounds, runOne); await drain(); }
     // ekip modu (içerik/araştırma): ekip toplantısı (olmuş/olmamış/olabilir → tartışma → CEO kararı) → kararlar paralel uygulanır → denetçi yeniden bakar
     else for (let round = 1; round <= rounds && !p.cancelled; round++) {
       const fixes = await teamMeeting(p, done, round);
@@ -1246,6 +1481,7 @@ async function executePlan(p, { resume = false } = {}) {
       p.board.push(...extra.map(t => ({ id: t.id, agent: t.agent, cli: t.cli, kind: t.kind, caps: t.caps, instruction: t.instruction, deliverable: t.deliverable, needs: t.needs, status: 'bekliyor' })));
       tasks.push(...extra); save(); emit('project', p);
       await runDag(p, extra, done, runOne);
+      await drain();
     }
     if (Object.keys(done).length && !p.cancelled) {
       // token harcamadan rapor: ajan özetleri + çıktı dosyaları
@@ -1255,6 +1491,10 @@ async function executePlan(p, { resume = false } = {}) {
       const revs = (p.board || []).filter(x => x.review), applied = revs.filter(x => x.review.applied).length;
       const meets = (p.board || []).filter(x => x.meeting), decN = meets.reduce((a, x) => a + x.meeting.decisions, 0), rejN = meets.reduce((a, x) => a + x.meeting.rejected, 0);
       p.summary = cut(((p.summary || '') + ' ' + main.map(d => d.summary).join(' ')).trim(), 900);
+      // uzun süreli bellek: ne istendi, ne yapıldı, hangi kararlar alındı (sonraki projelerde ilgili olanlar isteme girer)
+      memAdd({ kind: 'proje', project: p.name, text: `${p.name}: istek "${cut(p.brief || '', 220)}" → ${cut(main.map(d => d.summary).join(' '), 380)}` });
+      for (const d of (p.decisions || []).slice(0, 8)) memAdd({ kind: 'karar', project: p.name, text: d });
+      if (p.vision?.tarz) memAdd({ kind: 'karar', project: p.name, text: 'Tarz: ' + cut(p.vision.tarz, 400) });
       p.participants = [...new Set([...(p.participants || []), ...ds.map(d => d.agent)])];
       const files = listFiles(wsDir(p)), cr = p.criteria || [], acc = p.acceptance || {}, passN = cr.filter(c => acc[c.id]?.durum === 'gecti').length;
       const accText = cr.length ? `\n\nKabul ölçütleri: ${passN}/${cr.length} karşılandı` + (cr.some(c => acc[c.id]?.durum !== 'gecti') ? '\n' + cr.filter(c => acc[c.id]?.durum !== 'gecti').map(c => `• ${c.id} ${acc[c.id] ? 'karşılanmadı' : 'denetlenmedi'}: ${c.olcut}${acc[c.id]?.not ? ' — ' + acc[c.id].not : ''}`).join('\n') : '') : '';
@@ -1268,6 +1508,7 @@ async function executePlan(p, { resume = false } = {}) {
     }
     p.tasksLog = [...(p.tasksLog || []), ...tasks.map(t => ({ agent: t.agent, instruction: t.instruction }))].slice(-30);
   } finally {
+    runCtx.delete(p.id); for (const [k, v] of liveTasks) if (v.p === p) liveTasks.delete(k);
     p.executing = false; setTimeout(() => checkLimit().catch(() => {}), 1500);
     const snap = { id: p.runId, ts: p.runStart, end: Date.now(), tasks: (p.board || []).map(({ metrics, ...x }) => x) };
     p.runs = (p.runs || []).filter(r => r.id !== snap.id).concat(snap).slice(-20);
@@ -1301,11 +1542,13 @@ async function finishProject(p, rating, note) {
   const r = await ask(p, 'ceo', `DERS_YAZ\nProje: ${p.name}. Kullanıcı geri bildirimi → ${fb}\nAjanlar:\n${info}\nHer ajan için gelecek projelerde işe yarayacak EN FAZLA 2 kalıcı ders yaz (somut, bu kullanıcıya özgü, genel geçer laf yok). SADECE JSON: {"<ajan anahtarı>":["ders", "ders"],"kullanici":["bu kullanıcının kalıcı tercihi (varsa, en fazla 2, kısa)"]}`, { purpose: 'dersleri çıkar', phase: 'text', model: 'haiku' });
   let out = {}; try { out = JSON.parse(r.response.match(/\{[\s\S]*\}/)[0]); } catch {}
   for (const x of (Array.isArray(out.kullanici) ? out.kullanici : []).map(String).filter(x => x.length > 6).slice(0, 2)) if (!S.shared.prefs.includes(x)) S.shared.prefs.push(x);
+  for (const x of S.shared.prefs.slice(0, -12)) memAdd({ kind: 'tercih', text: x, w: 2 });   // isteme sığmayan eski tercihler belleğe
   S.shared.prefs = S.shared.prefs.slice(-12);
+  memAdd({ kind: 'proje', project: p.name, text: `${p.name} — kullanıcı puanı ${rating}/5${note ? ': ' + note : ''}`, w: 2 });
   for (const id of uniq) {
     const lessons = (Array.isArray(out[id]) ? out[id] : []).map(String).filter(l => l.length > 8).slice(0, 2);
     const ag = S.hats[id];
-    for (const l of lessons) addLesson(ag, l, 'kullanici');
+    for (const l of lessons) learn(id, l, 'kullanici');
     if (lessons.length) post(p, id, 'user', `Öğrendiklerim:\n${lessons.map(l => '• ' + l).join('\n')}`, { reqId: r.id });
   }
   p.finished = true; save(); emit('state', publicState());
@@ -1399,11 +1642,21 @@ function savingsState() {
 }
 const reqMeta = ({ system, prompt, response, ...m }) => m;   // ağır metinler arayüze gönderilmez
 const hatsState = () => Object.fromEntries(Object.entries(S.hats).map(([k, a]) => [k, { ...a, level: levelOf(a), focus: focusOf(a), charter: charterFor(k, S.settings.lang), baseline: baselineOf(k, S.settings.baseMin || {}), skillList: skillsOf(k, a).map(({ id, name, desc, when, steps, done, on, own, always }) => ({ id, name, desc, when: Array.isArray(when) ? when.join(', ') : when, steps, done, on, own, always: !!always })) }]));
-const publicState = () => ({ capabilities: CAPABILITIES.map(({ id, name, desc, roles }) => ({ id, name, desc, roles })), hats: hatsState(),
+// su ayak izi: bugün, bu ay, toplam (günlük token kayıtlarından) ve ajan başına; her biri düşük/orta/yüksek mL
+function waterState() {
+  const now = new Date(), d = n => String(n).padStart(2, '0'), today = `${now.getFullYear()}-${d(now.getMonth() + 1)}-${d(now.getDate())}`, month = today.slice(0, 8);
+  let t = {}, m = {}, all = {}; const by = {};
+  for (const [day, v] of Object.entries(S.daily || {})) {
+    all = addTokens(all, v); if (day.startsWith(month)) m = addTokens(m, v); if (day === today) t = addTokens(t, v);
+    for (const [k, x] of Object.entries(v.by || {})) by[k] = addTokens(by[k], x);
+  }
+  return { today: waterOf(t), month: waterOf(m), all: waterOf(all), byCli: Object.fromEntries(Object.entries(by).map(([k, x]) => [k, waterOf(x)])), scenarios: WATER_SCENARIOS };
+}
+const publicState = () => ({ water: waterState(), capabilities: CAPABILITIES.map(({ id, name, desc, roles }) => ({ id, name, desc, roles })), hats: hatsState(), memory: { total: MEM.items.length },
   agents: Object.fromEntries(Object.entries(S.agents).map(([k, a]) => [k, { ...a, label: PROVIDERS[k].label, level: levelOf(a), usable: provUsable(k), installed: k === 'claude' ? !!CLAUDE || FORCE_DEMO : !!BINS[k] || FORCE_DEMO }])),
-  offices: S.offices, ext: S.ext, user: USER, projects: S.projects.map(({ procs, ...x }) => ({ ...x, own: !!x.dir && path.dirname(path.resolve(x.dir)).toLowerCase() === path.resolve(WORK).toLowerCase() })), requests: S.requests.map(reqMeta), parallel: parallel(), approvals: [...approvals.values()].map(strip),
+  offices: S.offices, ext: S.ext, user: USER, projects: S.projects.map(({ procs, ...x }) => ({ ...x, water: x.tok ? waterOf(x.tok) : null, own: !!x.dir && path.dirname(path.resolve(x.dir)).toLowerCase() === path.resolve(WORK).toLowerCase() })), requests: S.requests.map(reqMeta), parallel: parallel(), approvals: [...approvals.values()].map(strip),
   live: SHOWCASE ? { claude: true, info: 'bağlı', demo: false, off: false, available: true } : { claude: liveMode() && !cliOff(), info: claudeInfo.text, demo: !liveMode(), off: cliOff(), available: !!CLAUDE && !FORCE_DEMO },
-  providers: PROVIDER_KEYS.map(k => ({ key: k, label: PROVIDERS[k].label, installed: SHOWCASE || (k === 'claude' ? !!CLAUDE : !!BINS[k]), ok: SHOWCASE || (k === 'claude' ? liveMode() : !!provInfo[k].ok), text: SHOWCASE ? 'bağlı' : k === 'claude' ? claudeInfo.text : provInfo[k].text, usable: provUsable(k), shotTool: k === 'antigravity' ? agyShotAllowed() : k === 'codex' || k === 'claude', login: logins[k] ? { url: logins[k].url, text: logins[k].text, ts: logins[k].ts } : null, src: PRIOR_SRC[k], ...(k === 'claude' ? { on: true } : S.settings.providers[k]) })),
+  providers: PROVIDER_KEYS.map(k => ({ key: k, label: PROVIDERS[k].label, installed: SHOWCASE || (k === 'claude' ? !!CLAUDE : !!BINS[k]), ok: SHOWCASE || (k === 'claude' ? liveMode() : !!provInfo[k].ok), text: SHOWCASE ? 'bağlı' : k === 'claude' ? claudeInfo.text : provInfo[k].text, usable: provUsable(k), shotTool: k === 'antigravity' ? agyShotAllowed() && agyTeamAllowed() : k === 'codex' || k === 'claude', login: logins[k] ? { url: logins[k].url, text: logins[k].text, ts: logins[k].ts } : null, src: PRIOR_SRC[k], ...(k === 'claude' ? { on: true } : S.settings.providers[k]) })),
   routing: Object.fromEntries(Object.keys(CATEGORIES).map(c => [c, { label: CATEGORIES[c], est: Object.fromEntries(PROVIDER_KEYS.map(k => [k, estimate(S.routing, k, c)])) }])),
   shared: S.shared, daily: S.daily, limits: S.limits, savings: savingsState(), usage: S.usage || null, log: S.log.slice(-300), settings: S.settings, templates: Object.entries(TEMPLATES).map(([key, t]) => ({ key, name: t.name, hint: t.hint })) });
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.glb': 'model/gltf-binary', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.txt': 'text/plain; charset=utf-8' };
@@ -1427,6 +1680,12 @@ http.createServer(async (req, res) => {
       if (req.method === 'GET' && parts[1] === 'requests' && parts[2]) { const r = S.requests.find(x => x.id === parts[2]); return r ? json(res, r) : json(res, { error: 'bulunamadı' }, 404); }
       if (req.method === 'POST' && parts[1] === 'approval') { const b = await body(req); return json(res, await requestApproval(b)); }   // approver.js'ten
       if (req.method === 'POST' && parts[1] === 'self-shot') { const b = await body(req); return json(res, await selfShot(b)); }   // approver.js'ten: ajanın ekran görüntüsü aracı
+      if (req.method === 'POST' && parts[1] === 'team') { const b = await body(req); return json(res, await teamCall(b)); }   // approver.js'ten: ekip araçları ve bellek araması
+      if (parts[1] === 'longmem') {   // uzun süreli bellek: GET ?q= ara (boşsa en yeniler), POST {delete:id} sil
+        if (req.method === 'GET') { const q = url.searchParams.get('q') || ''; return json(res, { total: MEM.items.length, items: q ? recall(MEM, q, { k: 30, minScore: 0.3 }) : MEM.items.slice(-30).reverse() }); }
+        const b = await body(req); if (b.delete) { MEM.items = MEM.items.filter(x => x.id !== b.delete); memSave(); } if (b.clear === true) { MEM.items = []; memSave(); }
+        return json(res, { ok: true, total: MEM.items.length });
+      }
       if (req.method === 'POST' && parts[1] === 'approvals' && parts[2] === 'bulk') { const b = await body(req); let n = 0; for (const a of [...approvals.values()]) if ((!b.risk || a.risk === b.risk) && (!b.project || a.projectId === b.project)) { a.settle(b.decision === 'allow' ? 'allow' : 'deny', false); n++; } return json(res, { ok: true, n }); }
       if (req.method === 'POST' && parts[1] === 'approvals' && approvals.has(parts[2])) { const b = await body(req); approvals.get(parts[2]).settle(b.decision === 'allow' ? 'allow' : 'deny', !!b.always); return json(res, { ok: true }); }
       if (req.method === 'POST' && parts[1] === 'pick-folder') return json(res, await pickFolder());
@@ -1459,7 +1718,7 @@ http.createServer(async (req, res) => {
         if (parts[3] === 'revert') {
           if (p.executing) return json(res, { error: 'Ajanlar çalışırken geri alınamaz' }, 400);
           const bt = (p.board || []).find(x => x.snap === b.snap); if (!bt) return json(res, { error: 'adım bulunamadı' }, 404);
-          let r; try { r = restoreSnapshot(p, b.snap); } catch (e) { return json(res, { error: e.message }, 400); }
+          let r; try { r = await restoreSnapshot(p, b.snap); } catch (e) { return json(res, { error: e.message }, 400); }
           const from = bt.startedAt || r.ts;   // bu adım ve sonrası: asıl görevler sıraya döner, toplantı/düzeltme adımları kalkar
           p.board = (p.board || []).filter(x => !(x.kind && (x.startedAt || 0) >= from));
           for (const x of p.board) if (x === bt || (x.startedAt || 0) >= from) { x.status = 'bekliyor'; for (const k of ['startedAt', 'endedAt', 'summary', 'metrics', 'review', 'score', 'snap', 'skills']) delete x[k]; }
@@ -1528,7 +1787,7 @@ http.createServer(async (req, res) => {
         } else { S.settings.cli = true; checkAuth(); checkProviders(); }
         save(); emit('state', publicState()); return json(res, { ok: true, on: S.settings.cli !== false });
       }
-      if (req.method === 'POST' && parts[1] === 'settings') { const b = await body(req); if (b.lang === 'tr' || b.lang === 'en') S.settings.lang = b.lang; if ([1, 2, 3].includes(+b.parallel)) S.settings.parallel = +b.parallel; if (b.review !== undefined && [0, 1, 2].includes(+b.review)) S.settings.review = +b.review; if (b.explore !== undefined) S.settings.explore = !!b.explore; if (b.providers && typeof b.providers === 'object') for (const k of ['codex', 'antigravity']) { const v = b.providers[k]; if (!v || typeof v !== 'object') continue; const c = S.settings.providers[k]; if (v.on != null) c.on = !!v.on; if (v.model != null) c.model = safeModel(v.model); if (k === 'antigravity' && v.trust != null) c.trust = !!v.trust; } if (b.resetRouting) S.routing = {}; for (const k of ['subUsd', 'hourTry', 'usdTry']) if (b[k] !== undefined) S.settings[k] = Math.max(0, +b[k] || 0) || null; if (b.baseMin && typeof b.baseMin === 'object') S.settings.baseMin = Object.fromEntries(Object.entries(b.baseMin).filter(([k, v]) => S.hats[k] && +v > 0).map(([k, v]) => [k, Math.min(2400, +v)])); save(); emit('state', publicState()); return json(res, { ok: true }); }
+      if (req.method === 'POST' && parts[1] === 'settings') { const b = await body(req); if (b.lang === 'tr' || b.lang === 'en') S.settings.lang = b.lang; if ([1, 2, 3].includes(+b.parallel)) S.settings.parallel = +b.parallel; if (b.review !== undefined && [0, 1, 2].includes(+b.review)) S.settings.review = +b.review; if (b.explore !== undefined) S.settings.explore = !!b.explore; if (b.providers && typeof b.providers === 'object') for (const k of ['codex', 'antigravity']) { const v = b.providers[k]; if (!v || typeof v !== 'object') continue; const c = S.settings.providers[k]; if (v.on != null) c.on = !!v.on; if (v.model != null) c.model = safeModel(v.model); if (k === 'antigravity' && v.trust != null) c.trust = !!v.trust; if (k === 'codex' && v.web != null) c.web = !!v.web; if (k === 'codex' && v.images != null) c.images = !!v.images; if (k === 'codex' && v.imageMax != null) c.imageMax = Math.min(30, Math.max(1, Math.round(+v.imageMax) || 8)); } if (b.resetRouting) S.routing = {}; for (const k of ['subUsd', 'hourTry', 'usdTry']) if (b[k] !== undefined) S.settings[k] = Math.max(0, +b[k] || 0) || null; if (b.baseMin && typeof b.baseMin === 'object') S.settings.baseMin = Object.fromEntries(Object.entries(b.baseMin).filter(([k, v]) => S.hats[k] && +v > 0).map(([k, v]) => [k, Math.min(2400, +v)])); save(); emit('state', publicState()); return json(res, { ok: true }); }
       if (req.method === 'POST' && parts[1] === 'event') {   // dış araçlar durum bildirebilir: {name, state: working|idle|blocked|done, note}
         if (process.env.OFIS_API_TOKEN && req.headers['x-ofis-token'] !== process.env.OFIS_API_TOKEN) return json(res, { error: 'token gerekli' }, 401);
         const b = await body(req); const name = String(b.name || '').trim().slice(0, 24); if (!name) return json(res, { error: 'name gerekli' }, 400);

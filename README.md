@@ -97,9 +97,11 @@ Ajanlar Claude Code'un yanında **OpenAI Codex CLI** (`codex exec --json`) ve **
 - **Tahmin nereden gelir?** Başlangıçta kamuya açık kıyaslardan gelen hafif bir ön bilgi (Claude: gerçek depo hatası düzeltme/SWE-bench; Codex: terminal görevleri/Terminal-Bench; Antigravity/Gemini: web arayüzü ve Google aramalı araştırma); bu bilgi sadece 3 görev ağırlığındadır. Sonra projelerindeki ölçülebilir puanlar (teslimat, denetçi kalitesi, verimlilik) ve Bitir'de verdiğin puan (yarım ağırlık) eklendikçe tablo senin kullanımına göre değişir. Tablo kartta görünür; ⟲ ile sıfırlanır.
 - **Hata olursa:** Codex/Antigravity bir görevde hata verirse bu 1 puan sayılır ve görev Claude Code ile bir kez daha denenir.
 - **Güvenlik farkı:** Codex ve Antigravity ofisin onay kutusuna bağlanamaz (Claude Code'daki `--permission-prompt-tool` karşılığı yok). Bu yüzden kendi sandbox'larında, çalışma klasörüyle sınırlı ve onay sormadan çalışırlar: Codex `--sandbox workspace-write` (ağ kapalı, bu yüzden web araştırmasına atanmaz), planlamada `read-only`; Antigravity `--sandbox --mode accept-edits` (dosya düzenleyebilir; komut çalıştırma sadece "tam yetki" açıksa). Paket kurma veya klasör dışı erişim gerektiren riskli işlerde ajanı Claude Code'da tut.
+- **Sonradan denetim:** Codex ve Antigravity önceden soramadığı için her görevden sonra kayıt noktaları arasındaki fark kodla denetlenir (token harcamaz): eklenen/değişen betik ve çalıştırılabilir dosyalar (`.ps1`, `.bat`, `.sh`, `.exe`…), gizli bilgi dosyaları (`.env`, anahtar, `.npmrc`…), CI/kanca/ajan ayarları, toplu silme, `package.json`'a eklenen bağımlılıklar ve kurulumda kendiliğinden çalışan betikler (`postinstall`…). Riskli bir şey varsa sohbette uyarı ve bildirim çıkar; panodaki "↶ Bu adımdan önceye dön" ile tek tıkla geri alınır.
+- **Codex web araması (isteğe bağlı):** Analiz → CLI sağlayıcıları → Codex → **web araması** açılırsa Codex'in yerleşik arama aracı açılır (`-c web_search="live"`); kabuk komutlarında ağ yine kapalıdır. Açıkken web araştırması görevleri Codex'e de verilebilir, böylece bu işler hep Claude'a kalmaz.
 - **Codex Windows'ta:** Codex'e her çalıştırmada `windows.sandbox="unelevated"` verilir (yönetici kurulumu gerektirmez). Bu olmadan Windows'ta salt okunur ve çalışma modunda tüm kabuk komutları "blocked by policy" ile reddediliyor, Codex dosya okuyamıyordu. Sınırlar korunur: gözden geçirmede (`read-only`) dosya yazamaz, işte (`workspace-write`) yalnızca proje klasörüne yazar. Ekran görüntüsü aracına yalnızca o araç için onay verilir (`tools.screenshot.approval_mode="approve"`).
 - **Antigravity gözden geçirmede:** Plan modunda çalışır ve dosya yazamaz (agy 1.3.5'te `--disable-slash-commands` ile birlikte `--mode plan` etkisiz kaldığı için bu bayrak yalnızca iş aşamasında verilir).
-- **Antigravity ekran görüntüsü aracı:** agy'de çalıştırma başına MCP bayrağı yoktur. Ofis, Antigravity çalışırken proje klasörüne geçici bir `.agents/mcp_config.json` yazar; senin aynı adlı dosyan varsa korunur ve iş bitince aynen geri yazılır, yoksa silinir. Başsız modda MCP izni sorulamadığı için **Analiz → CLI sağlayıcıları → Antigravity → Ekran görüntüsü aracı: Bağla** düğmesi, onayınla genel ayar dosyasına (`~/.gemini/antigravity-cli/settings.json`) yalnızca `mcp(ofis/screenshot)` kuralını ekler; başka hiçbir izin açılmaz, **Kaldır** ile geri alınır. Bağlı değilse Antigravity verilen ekran görüntüsü yollarını açar.
+- **Antigravity ekran görüntüsü aracı:** agy'de çalıştırma başına MCP bayrağı yoktur. Ofis, Antigravity çalışırken proje klasörüne geçici bir `.agents/mcp_config.json` yazar; senin aynı adlı dosyan varsa korunur ve iş bitince aynen geri yazılır, yoksa silinir. Başsız modda MCP izni sorulamadığı için **Analiz → CLI sağlayıcıları → Antigravity → Ekran görüntüsü ve ekip araçları: Bağla** düğmesi, onayınla genel ayar dosyasına (`~/.gemini/antigravity-cli/settings.json`) yalnızca ofisin kendi araçları için dar kurallar ekler: `mcp(ofis/screenshot)` ile `team_message`, `team_inbox`, `team_ask`, `team_request` ve `memory_search` için birer `mcp(ofis/…)` kuralı. Başka hiçbir izin açılmaz, **Kaldır** ile hepsi geri alınır. Eski sürümde yalnızca ekran görüntüsü kuralını eklediysen düğme yeniden "Bağla" görünür; ekip araçları için bir kez daha onay ver. Bağlı değilse Antigravity verilen ekran görüntüsü yollarını açar.
 - **İnceleyemeyen gözden geçiren:** Bir ajan dosyaları okuyamaz ya da yanıt biçimine uymazsa boş bulgu listesi "sorun yok" sayılmaz; inceleme Claude Code ile bir kez daha yapılır.
 - Kısa metin çağrıları (soru-cevap, ders çıkarma) her zaman Claude Code ile yapılır.
 
@@ -173,7 +175,9 @@ Ekip, MetaGPT/ChatDev'deki gibi aşamalı ve belgeye dayalı çalışır; iş, �
 
 **Canlı önizleme:** Üst çubuktaki göz düğmesi ekibin ürettiği siteyi/oyunu büyük bir pencerede açar (masaüstü/mobil, yenile, tarayıcıda aç); bir adım bitince kendiliğinden yenilenir. Önizleme **ayrı bir porttan** (ana port + 1, `OFIS_PREVIEW_PORT` ile değişir), yalnızca projenin klasöründen ve salt okunur sunulur; uygulamanın API'si yalnızca kendi portundan gelen tarayıcı isteklerini kabul ettiği için üretilen sayfa API'ye erişemez.
 
-**Geri alma:** Her adım başlamadan önce çalışma klasörünün anlık görüntüsü uygulamanın veri klasörüne alınır (50 MB üstü klasörlerde alınmaz, proje başına son 20 tutulur). Panoda "↶ Bu adımdan önceye dön" klasörü o hâline döndürür; sonradan oluşan dosyalar **silinmez**, yedek klasörüne taşınır; geri almadan önce de bir görüntü alınır. Geri alınan adımlar sıraya döner, "Devam et" ile yeniden çalışır.
+**Geri alma (git kayıt noktaları):** Her adım başlamadan önce ve bittikten sonra çalışma klasörünün hâli, uygulamanın veri klasöründeki **ayrı bir gölge git deposuna** kaydedilir (`data/snaps/<proje>/repo.git`). Yalnızca değişen dosyalar saklandığı için **boyut sınırı yoktur**; görselli oyun projeleri de geri alınabilir. Kullanıcının kendi `.git`'ine, dallarına ve git ayarlarına dokunulmaz; `node_modules` kaydedilmez. Panoda "↶ Bu adımdan önceye dön" klasörü o hâline döndürür: değişen ve silinen dosyalar geri gelir, sonradan oluşan dosyalar **silinmez**, yedek klasörüne taşınır; geri almadan önce de bir kayıt noktası alınır (geri alma da geri alınabilir). Git kurulu değilse eski yönteme (50 MB'a kadar kopya) düşülür. Geri alınan adımlar sıraya döner, "Devam et" ile yeniden çalışır.
+
+**Değişiklik raporu ve dosya çakışması:** Panoda her adımın altında o adım sürerken klasörde ne değiştiği görünür (yeni/değişen/silinen dosyalar). Aynı dosyaya paralel çalışan iki görev yazarsa bu anında yakalanır: günlüğe düşer, panoda "Dosya çakışması" yazar ve iki ajanın gelen kutusuna "dosyayı yeniden oku, gerekiyorsa anlaş" mesajı gider.
 
 **Düzeltmelerde bağlam:** Düzeltme ve akran önerisi turlarında ajan kendi önceki raporunu görür; dosyaları baştan keşfetmez (token tasarrufu). Claude Code oturumlarını sürdürmek (resume) bilinçli olarak kullanılmaz: oturum kayıtlarını kullanıcının ev klasörüne yazar.
 
@@ -183,9 +187,30 @@ Ekip lideri planlarken ofisin **yetenek kataloğunu** görür ve görevlere yete
 - **Vektör çizim (SVG)**: logo, ikon, karakter, katmanlı arka plan.
 - **Çalıştırıp doğrulama** (yazılımcı): sözdizimi ve test komutları.
 
-> Ofis fotoğraf gerçekliğinde resim **üretemez** (CLI'ler görsel üretmez); görseller piksel sanat ya da SVG olarak üretilir. Senin verdiğin PNG'ler (ör. bir sprite sheet) çalışma klasörüne konursa arka planı kaldırılıp assetlere bölünebilir.
+- **Görsel üretimi (Codex, isteğe bağlı)**: Codex CLI'nin yerleşik görsel üretimiyle (gpt-image-2) gerçek görsel üretir: karakter, sprite, arka plan, illüstrasyon. **Ayrı ücret yoktur**: görseller ChatGPT aboneliğinin Codex limitinden düşer. Açmak için **Analiz → CLI sağlayıcıları → Codex → görsel üretimi**.
+  - **Ücretsiz kalma garantisi:** Yalnızca Codex **ChatGPT aboneliğiyle** giriş yaptıysa açılabilir (`codex login status` → "Logged in using ChatGPT"); API anahtarıyla girişte görseller ücretli API'den faturalanacağı için seçenek kapalı kalır. `OPENAI_API_KEY`/`CODEX_API_KEY` CLI'lere hiçbir zaman geçirilmez ve ajana ücretli "CLI fallback" yolunu kullanmaması söylenir.
+  - **Limit koruması:** Görsel turları limiti metne göre 3-5 kat hızlı tüketir. Bu yüzden proje başına bir sınır vardır (varsayılan 8, en fazla 30). Görsel üretimi yalnızca lider "gorsel-uret" yeteneği verdiği görevde ve o görev Codex'te çalışırken açılır; diğer bütün Codex çalıştırmalarında `features.image_generation=false` verilir, yani Codex kendi kararıyla görsel üretip limiti harcayamaz. Hak biterse ya da görev Codex dışında çalışırsa ajan piksel sanat/SVG'ye döner.
+  - **Dosyalar:** Codex görselleri kendi klasörüne (`~/.codex/generated_images/`) yazar. Ajan bunları proje klasörüne kopyalar; kopyalamadığı yeni görselleri ofis iş bitince `assets/uretilen/` altına alır (Codex'teki asıllarına dokunulmaz). Görsel üreten Codex çalıştırmaları, hangi görselin hangi projeye ait olduğu karışmasın diye sırayla çalışır.
+  - **Saydam arka plan:** Görsel düz renk (ör. #00ff00) arka planla istenir, sonra asset aracının `nobg` komutuyla temizlenir (Python gerekmez).
+  - Antigravity CLI'de görsel üretimi yok; Claude Code görsel üretmez.
+
+> Görsel üretimi kapalıyken görseller piksel sanat ya da SVG olarak üretilir. Senin verdiğin PNG'ler (ör. bir sprite sheet) çalışma klasörüne konursa arka planı kaldırılıp assetlere bölünebilir.
 
 **Proje türü rehberleri:** İstek bir türe uyuyorsa (oyun, web sitesi, web uygulaması) ekip liderine önerilen iş akışı verilir. Örneğin oyunda: tasarım belgesi + asset listesi ve atlas sözleşmesi → assetler ile oyun kodu **paralel** → oynanabilirlik denetimi. Oyun için ayrıca beceriler var: oyun tasarım belgesi, oyun asseti üretimi, oyun geliştirme (Canvas), oyun denetimi.
+
+## Ekip iletişimi: ajanlar çalışırken birbirine yazar
+Ajanlar yalnızca lider ve toplantılar üzerinden değil, **çalışırken doğrudan** da konuşur. Ofisin MCP sunucusu (`approver.js`) üç CLI'ye de şu araçları verir (Claude'a ofisin MCP ayarıyla, Codex'e çalıştırma başına `-c` ile, Antigravity'ye Analiz'deki **Bağla** düğmesiyle eklenen dar kurallarla):
+- **team_message** `{to, text}`: bir şapkaya ya da herkese not bırakır (ör. "karakterler 32×32 olacak"). Sohbette de görünür.
+- **team_inbox**: gelen mesajları okur. Görev başlarken okunmamış mesajlar zaten isteme girer.
+- **team_ask** `{to, question}`: işi engelleyen bir soruyu **hemen** sorar; diğer şapka kısa bir Claude çağrısıyla, projenin özetini ve kendi işini görerek yanıtlar. Görev başına en fazla 3.
+- **team_request** `{to, work, deliverable}`: başka bir şapkaya ayrı bir iş verir (ör. yapımcı tasarımcıdan "kahramanın yürüme kareleri"ni ister). İş panoya "istek" olarak eklenir ve **paralel** çalışır; bitince isteyenin gelen kutusuna haber gider. Rapor ve puanlama, istekler bitmeden yapılmaz. Proje başına en fazla 3.
+- **memory_search** `{query}`: uzun süreli bellekte arar (aşağıya bak).
+
+## Uzun süreli bellek
+Her şapka istemine en güçlü 6 dersini taşır ve en fazla 24 ders tutar. Bunun dışına düşen dersler artık **kaybolmaz**, uzun süreli belleğe (`data/memory.json`, en fazla 2000 kayıt) gider. Biten her projenin isteği ve sonucu, yapımcının kararları, seçilen tarz, senin puanın ve isteme sığmayan eski tercihlerin de buraya yazılır.
+- **Arama API'siz:** Vektör veritabanı ve gömme modeli yerine BM25 anahtar kelime araması kullanılır; Türkçe ekler için kelimeler köke yakın kısaltılır ("oyunların" ~ "oyunlar"). Kayıtlar 6 ayda yarı ağırlığa iner.
+- Her görevde işe en ilgili 4 kayıt "GEÇMİŞTEN HATIRLADIKLARIN" olarak isteme girer (zaten istemde olan dersler tekrar girmez); bir şapkanın dersleri yalnızca o şapkaya, proje/karar kayıtları herkese gelir. Ajan `memory_search` ile kendisi de arayabilir.
+- `GET /api/longmem?q=...` ile aranır, `POST /api/longmem {"delete":"<id>"}` ile kayıt silinir.
 
 ## Ekip içi inceleme
 - **Ortak ürün vizyonu:** Ekip lideri projeyi yalnızca ön yüz olarak değil, bütün bir ürün olarak planlar (araştırma, içerik, tasarım, teknik, yayına alma, kalite) ve planla birlikte **amaç, kitle, başarı ölçütü ve kapsamı** yazar. Vizyon plan kartında görünür ve her ajanın istemine girer.
@@ -205,6 +230,19 @@ Puan (1-10) = Teslimat %40 + Kalite %35 + Verimlilik %15 + Uyum %10.
 Kullanıcı puanı (Bitir) ayrıca eklenir. Ölçüt hesaplanamıyorsa ağırlıklar kalanlara yeniden dağıtılır.
 
 **Doğrulanmamış iş puanlanmaz:** Bağımsız denetim yapılamadıysa (gözden geçirenler çalışmadı ya da sonuç vermedi) puanlar kaydedilmez; seviye, "kim neyde iyi" tablosu ve dersler etkilenmez, sohbette "DOĞRULANMADI" yazar ve son rapor uyarıyla başlar. Kabul ölçütleri yalnızca bağımsız denetimle "geçti" sayılır; yapımcının "kontrol ettim" demesi yeterli değildir. Bütçe incelemeye yetmiyorsa tasarım incelemesi atlanır, denetim korunur.
+
+## Su ayak izi (tahmini)
+Üst çubuktaki damla göstergesi, ajanların **bugünkü** tahmini su ayak izini gösterir. Çubuk, bir yetişkinin günlük içme suyuna (2 L) oranıdır. Tıklayınca **Analiz → Su ayak izi** kartı açılır: bu proje, bugün, bu ay, toplam ve ajan (CLI) başına. Her çalıştırmadan sonra canlı güncellenir ve token harcamaz (`lib/water.mjs`).
+- **Yöntem:** su = enerji × su yoğunluğu. Enerji, ölçülen token sayılarından tahmin edilir: çıktı tokenı pahalı, yeni girdi tokenı daha ucuz, önbellekten okunan girdi en ucuz.
+- **Aralık:** Şirketler model başına kesin rakam yayımlamadığı için kalın sayı "orta" senaryodur; yanında düşük–yüksek aralık yazar.
+
+| Senaryo | 1000 çıktı tokenı | 1000 girdi | 1000 önbellek | Su | Dayanak |
+|---|---|---|---|---|---|
+| Düşük | 0,3 Wh | 0,015 Wh | 0,003 Wh | 1,1 mL/Wh | [Google 2025](https://arxiv.org/abs/2508.15734): ortanca Gemini istemi 0,24 Wh, 0,26 mL |
+| Orta | 1 Wh | 0,05 Wh | 0,01 Wh | 1,8 mL/Wh | Büyük model; sektör ortalaması su verimliliği ≈1,8 L/kWh |
+| Yüksek | 2 Wh | 0,1 Wh | 0,02 Wh | 5 mL/Wh | Uzun akıl yürütmeli işler + elektrik üretimindeki su ([Li ve ark. 2023](https://arxiv.org/abs/2304.03271)) |
+
+Model eğitimi, senin bilgisayarın ve Codex'in görsel üretimi hesaba dahil değildir. Sonuç bir tahmindir; gerçek değer veri merkezine, mevsime ve modele göre değişir.
 
 ## Tasarruf (yöntem)
 **Analiz → Bu ay tasarruf** kartı şu formülü kullanır:
@@ -281,7 +319,8 @@ Tüm durum (projeler, ajanların dersleri, ayarlar, ofis düzeni, Electron profi
   - `test/growth.test.mjs`: dersler, seviye, gelişim alanı, tasarruf hesabı.
   - `test/providers.test.mjs`: iş türü ayrımı, öğrenme/seçim, Codex ve Antigravity çıktı ayrıştırma, güvenli argüman.
   - `test/design.test.mjs`: jenerik tasarım ve kullanılabilirlik denetimleri, sektör yönleri, estetik becerisinin önceliği.
-  - `test/server.test.mjs`: ayrı bir veri klasörüyle gerçek sunucu — Host/Origin koruması, dış olay girişi, düzen, plan→pano→puan→geçmiş akışı, token bütçesi, çökme sonrası kurtarma, çoklu CLI yönlendirme.
+  - `test/team.test.mjs`: gölge git kayıt noktaları (60 MB'lık klasör, kullanıcının `.git`'i korunur, paralel kayıt, geri almanın geri alınması), değişiklik risk denetimi, uzun süreli bellek araması, Codex web araması yönlendirmesi, MCP araç listesi.
+  - `test/server.test.mjs`: ayrı bir veri klasörüyle gerçek sunucu (ekip araçları ve bellek ucu dahil) — Host/Origin koruması, dış olay girişi, düzen, plan→pano→puan→geçmiş akışı, token bütçesi, çökme sonrası kurtarma, çoklu CLI yönlendirme.
 - `npm run shots`: README görsellerini (animasyon dahil) test modunda yeniden üretir.
 - `node tools/make-icon.mjs`: "VL" ikonunu üretir (`public/icon.svg`, `public/icon-256.png`, `electron/icon.ico`).
 - Arayüzün 3B kısmı (animasyonlar, düzenleyici, mini pencere) otomatik test edilmez; elle denenir.

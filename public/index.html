@@ -76,6 +76,10 @@ code{font:12px var(--fm);background:var(--paper2);padding:1px 5px;border-radius:
 #tok{color:var(--mut);font:12px var(--fm);padding:0 8px;white-space:nowrap;border-left:1px solid var(--line);border-right:1px solid var(--line)}
 .ib{width:32px;height:32px;padding:0;display:grid;place-items:center;border-radius:6px;font-size:16px}
 #langBtn{font:600 11.5px var(--fd);letter-spacing:.1em}
+#waterBtn{display:inline-flex;align-items:center;gap:5px;color:#2f7fb8;font-variant-numeric:tabular-nums;white-space:nowrap;flex-shrink:0}#waterBtn b{font-weight:600;font-size:12px}
+#waterBar{display:inline-block;width:34px;height:4px;border-radius:2px;background:rgba(47,127,184,.15);overflow:hidden}#waterBar i{display:block;height:100%;width:0;background:#2f7fb8;transition:width .3s}
+.wt-big{font-size:26px;font-weight:700;color:#2f7fb8;line-height:1.1}.wt-big span{display:block;font-size:12px;font-weight:500;color:var(--mut,#7a7266)}
+.wt-rng{font-size:11px;opacity:.7}
 #budget{position:absolute;left:8px;right:8px;bottom:0;height:3px;background:rgba(32,29,24,.08);overflow:hidden}#budget i{display:block;height:100%;background:var(--ok);width:0;transition:width .3s}#budget.warn i{background:var(--warn)}#budget.full i{background:var(--bad)}
 #top{position:fixed}
 
@@ -302,6 +306,7 @@ body.mini #inbox{top:56px;left:8px;width:calc(100vw - 16px)}
   <select id="offSel" title="Ofis"></select><button class="ib ghost" id="offBtn" title="Ofis ayarları: lider, üyeler, yeni ofis">⚙</button>
   <select id="projSel" title="Proje"></select>
   <span id="tok"></span>
+  <button class="ghost" id="waterBtn" title="Ajanların tahmini su ayak izi — ayrıntı için tıkla"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.7s-6 6.6-6 11.3a6 6 0 0 0 12 0c0-4.7-6-11.3-6-11.3z"/></svg><b id="waterTxt">0 mL</b><span id="waterBar"><i></i></span></button>
   <button class="ib ghost" id="langBtn" title="Dil / Language">TR</button>
   <button class="ib ghost" id="bellBtn" title="Bildirim sesi"><svg id="bellOn" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg></button>
   <button class="ib ghost" id="inboxBtn" title="Onay kutusu"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg><b id="ibn"></b></button>
@@ -385,7 +390,7 @@ function renderTop(){
   $('#cliBtn').title=L_.off?'Claude Code CLI bağlantısı kesik — tıkla: bağlan':L_.claude?'Claude Code CLI bağlı'+(L_.info?' ('+L_.info+')':'')+' — tıkla: bağlantıyı kes':'Bağlı değil: '+(L_.available?'Claude Code girişi yok (terminalde "claude auth login")':'Claude Code bulunamadı')+' — tıkla: yeniden dene';
   const i=ST.requests.reduce((a,r)=>a+r.tin,0),o=ST.requests.reduce((a,r)=>a+r.tout,0),c=ST.requests.reduce((a,r)=>a+(r.tcache||0),0);
   $('#tok').textContent=`↓ ${fmt(i)}  ↑ ${fmt(o)}`;$('#tok').title=`Yeni giriş ${i} · çıkış ${o} · önbellekten okunan ${c} token`;
-  const p=proj();$('#stopBtn').style.display=p.executing?'':'none';$('#ptitle').textContent=p.executing?'Çalışıyor…':p.pendingPlan?'Plan onayını bekliyor':'';paintBudget(p);renderBar();$('#miniName').textContent=p.name;$('#dot2').className=$('#dot').className;
+  const p=proj();$('#stopBtn').style.display=p.executing?'':'none';$('#ptitle').textContent=p.executing?'Çalışıyor…':p.pendingPlan?'Plan onayını bekliyor':'';paintBudget(p);paintWater();renderBar();$('#miniName').textContent=p.name;$('#dot2').className=$('#dot').className;
 }
 function renderRoster(){
   const o=office();
@@ -416,7 +421,7 @@ async function openPreview(){const p=proj();if(!p)return;pvInfo=await api('proje
   $('#pvMsg').textContent=pvInfo.pages.length?'Ekip dosyaları değiştirdikçe önizleme kendiliğinden yenilenir.':'Henüz HTML sayfası yok; ekip bir sayfa üretince burada görünür.';$('#pv').classList.add('on');loadPv()}
 const pvUrl=()=>pvInfo.base+($('#pvPage').value||'index.html').split('/').map(encodeURIComponent).join('/');
 function loadPv(){if(pvInfo)$('#pvf').src=pvUrl()+'?t='+Date.now()}
-$('#prevBtn').onclick=openPreview;$('#pvRe').onclick=loadPv;$('#pvPage').onchange=loadPv;
+$('#prevBtn').onclick=openPreview;$('#waterBtn').onclick=()=>{document.body.classList.remove('pclosed');$('#panel').classList.remove('closed');setTab('anal');setTimeout(()=>document.querySelector('#anal .wt-big')?.scrollIntoView({block:'center'}),50)};$('#pvRe').onclick=loadPv;$('#pvPage').onchange=loadPv;
 $('#pvX').onclick=()=>{$('#pv').classList.remove('on');$('#pvf').src='about:blank'};
 $('#pv').onclick=e=>{if(e.target.id==='pv')$('#pvX').click()};
 $('#pvOpen').onclick=()=>{if(pvInfo)window.open(pvUrl(),'_blank','noopener')};
@@ -613,13 +618,13 @@ document.addEventListener('click',e=>{
   else if(act==='par')api('settings',{parallel:+b.dataset.n});
   else if(act==='rev')api('settings',{review:+b.dataset.n});
   else if(act==='explore')api('settings',{explore:b.dataset.n==='1'});
-  else if(act==='provsave'){const pv={};for(const k of ['codex','antigravity']){const m=document.querySelector(`[data-pmodel="${k}"]`);if(m)pv[k]={model:m.value.trim()}}if(!pv.antigravity)pv.antigravity={};const tr=document.querySelector('[data-ptrust]');if(tr)pv.antigravity.trust=tr.checked;api('settings',{providers:pv}).then(()=>api('state')).then(s=>{ST=s;renderAnalytics()})}
+  else if(act==='provsave'){const pv={};for(const k of ['codex','antigravity']){const m=document.querySelector(`[data-pmodel="${k}"]`);if(m)pv[k]={model:m.value.trim()}}if(!pv.antigravity)pv.antigravity={};const tr=document.querySelector('[data-ptrust]');if(tr)pv.antigravity.trust=tr.checked;const wb=document.querySelector('[data-pweb]');if(wb)(pv.codex||={}).web=wb.checked;const im=document.querySelector('[data-pimg]');if(im&&!im.disabled)(pv.codex||={}).images=im.checked;const imx=document.querySelector('[data-pimgmax]');if(imx)(pv.codex||={}).imageMax=+imx.value||8;api('settings',{providers:pv}).then(()=>api('state')).then(s=>{ST=s;renderAnalytics()})}
   else if(act==='pconn'){b.disabled=true;api('providers/'+b.dataset.k+'/connect',{}).then(j=>{if(j.error)notify('Ofis',j.error,'ask')})}
   else if(act==='pdisc'){if(confirm('Bu CLI\'ye yeni iş verilmesin ve çalışan işleri hemen dursun mu? (Yarım görevler Claude Code ile sürer; tekrar Bağlan ile açarsın)'))api('providers/'+b.dataset.k+'/disconnect',{})}
   else if(act==='plogout'){if(confirm('Bağlantı kesilsin ve bu CLI\'nin bu bilgisayardaki girişi de silinsin mi? Tekrar bağlanırken tarayıcıda yeniden onay vermen gerekir.'))api('providers/'+b.dataset.k+'/disconnect',{logout:true})}
   else if(act==='popen')api('providers/'+b.dataset.k+'/open',{}).then(j=>{if(j.error)notify('Ofis',j.error,'ask')});
   else if(act==='pchk')api('providers/'+b.dataset.k+'/check',{});
-  else if(act==='pshot'){const on=b.dataset.on==='1';if(!on||confirm('Antigravity, yaptığı sayfanın ekran görüntüsünü alabilsin mi?\n\nAntigravity başsız modda izin soramadığı için genel ayar dosyasına (~/.gemini/antigravity-cli/settings.json) yalnızca şu kural eklenir:\n  mcp(ofis/screenshot)\n\nBaşka hiçbir izin açılmaz; "Kaldır" ile geri alınır.'))api('providers/antigravity/shot-tool',{on}).then(j=>{if(j.error)notify('Ofis',j.error,'ask')})}
+  else if(act==='pshot'){const on=b.dataset.on==='1';if(!on||confirm('Antigravity, yaptığı sayfanın ekran görüntüsünü alabilsin ve ekip araçlarını (mesaj, soru, iş isteği, bellek araması) kullanabilsin mi?\n\nAntigravity başsız modda izin soramadığı için genel ayar dosyasına (~/.gemini/antigravity-cli/settings.json) yalnızca şu kurallar eklenir:\n  mcp(ofis/screenshot)\n  mcp(ofis/team_message), mcp(ofis/team_inbox), mcp(ofis/team_ask), mcp(ofis/team_request), mcp(ofis/memory_search)\n\nHepsi yalnızca ofisin kendi araçlarıdır; başka hiçbir izin açılmaz. "Kaldır" ile geri alınır.'))api('providers/antigravity/shot-tool',{on}).then(j=>{if(j.error)notify('Ofis',j.error,'ask')})}
   else if(act==='provreset'){if(confirm('Hangi CLI\'nin neyde iyi olduğuna dair öğrenilenler silinsin mi? (Ön bilgi kalır)'))api('settings',{resetRouting:true}).then(()=>api('state')).then(s=>{ST=s;renderAnalytics()})}
   else if(act==='setbud')api('projects/'+p.id+'/settings',{budget:+$('#bud').value||0});
 });
@@ -717,9 +722,11 @@ function taskCard(x,i,all){
   const rv=x.review,rvh=rv?`<div class="rv ${rv.karar==='revize'?'fix':'ok'}">${rv.karar==='revize'
     ?`<details><summary><b>${esc(rn(rv.by))}</b> inceledi: ${rv.oneriler.length} öneri${rv.applied?' · uygulandı':x.phase==='düzeltme'?' · uygulanıyor':''}</summary><ul>${rv.oneriler.map(o=>'<li>'+esc(o)+'</li>').join('')}</ul></details>`
     :`<b>${esc(rn(rv.by))}</b> inceledi: onay${rv.guclu?' — '+esc(rv.guclu):''}`}</div>`:'';
+  // görevin değişiklikleri (kayıt noktaları arası), onaysız CLI'lerin riskli değişiklikleri ve paralel dosya çakışmaları
+  const cg=x.changes,fl=(cg&&cg.flags)||[],chh=(cg&&cg.n?`<div class="rv ${fl.length?'fix':'ok'}"><details><summary>Değişiklikler: ${esc(cg.summary)}${fl.length?' · <b>'+fl.length+' riskli</b>':''}</summary>${fl.length?'<ul>'+fl.map(f=>'<li><b>'+(f.level==='yuksek'?'YÜKSEK':'ORTA')+'</b> '+esc(f.file)+' — '+esc(f.why)+'</li>').join('')+'</ul>':''}<ul>${cg.files.map(f=>'<li><code>'+esc(f)+'</code></li>').join('')}</ul></details></div>`:'')+((x.conflicts||[]).length?`<div class="rv fix" title="Aynı dosyayı paralel çalışan başka bir görev de değiştirdi; iki ajana da haber verildi">Dosya çakışması: ${x.conflicts.map(esc).join(', ')}</div>`:'');
   return`<div class="step ${ST_CLS[x.status]||''}"><div class="sn">${i+1}</div><div class="sb">
     <div class="sh"><span class="who" style="--c:${who(x.cli||x.provider||x.agent).color}">${esc((ST.agents[x.cli||x.provider]?ST.agents[x.cli||x.provider].name+' · ':'')+hatT(x.agent))}</span>${x.kind?`<span class="kd">${esc(x.kind)}</span>`:x.role==='yapimci'?'<span class="kd">yapımcı</span>':''}<span class="tag ${ST_CLS[x.status]||''}">${ST_TXT[x.status]||esc(x.status)}</span></div>
-    <div class="si"${x.kind?' style="white-space:pre-line"':''}>${esc(x.instruction)}</div>${capChips(x.caps)}${rvh}
+    <div class="si"${x.kind?' style="white-space:pre-line"':''}>${esc(x.instruction)}</div>${capChips(x.caps)}${rvh}${chh}
     ${x.deliverable||note||x.provider||(x.skills||[]).length||(x.criteria||[]).length?`<div class="sm">${x.deliverable?'<span>Çıktı: '+esc(x.deliverable)+'</span>':''}${(x.criteria||[]).length?'<span title="Bu adımın karşılaması gereken kabul ölçütleri">Ölçüt: '+x.criteria.map(esc).join(', ')+'</span>':''}${(x.skills||[]).length?'<span title="Bu adımda uygulanan beceriler">Beceri: '+x.skills.map(esc).join(', ')+'</span>':''}${note?'<span>'+esc(note)+'</span>':''}${x.provider?'<span title="Bu adımı çalıştıran CLI">'+esc((PROV_OPTS.find(o=>o[0]===x.provider)||[,x.provider])[1].replace(/ \(.*\)/,''))+(x.score?' · '+x.score.toFixed(1)+'/10':'')+'</span>':''}</div>`:''}
     ${x.kind==='ekip toplantısı'&&x.summary&&!run?'<div class="rv ok">'+esc(x.summary)+'</div>':''}
     ${!proj().executing&&x.snap&&x.status!=='bekliyor'?`<button class="ghost rvt" data-act="revert" data-snap="${esc(x.snap)}" title="Çalışma klasörünü bu adım başlamadan önceki hâline döndürür">↶ Bu adımdan önceye dön</button>`:''}
@@ -794,6 +801,33 @@ function savingsHtml(){
       <div class="stl">✓ ölçülmüş (kontrollü deney) · * varsayım — kendi iş sürelerinle değiştirebilirsin:</div><div class="sv-set sv-base">${base}</div></details>
     <div class="sv-set"><label>Abonelik $/ay<input id="sv_sub" type="number" min="0" step="1" value="${sub??''}" placeholder="20, 100, 200"></label><label>Saatlik ücret ₺<input id="sv_rate" type="number" min="0" step="50" value="${rate??''}" placeholder="örn. 500"></label><label>1 $ = ₺<input id="sv_usd" type="number" min="0" step="0.1" value="${usd??''}" placeholder="kur"></label><button data-act="svsave">Kaydet</button></div></div>`;
 }
+// ---- su ayak izi (sunucu lib/water.mjs ile hesaplar; burada yalnızca gösterilir) ----
+const fmtW=ml=>{ml=Math.max(0,+ml||0);return ml>=1000?(ml/1000).toLocaleString(L(),{maximumFractionDigits:ml>=10000?0:1})+' L':ml>=10?Math.round(ml)+' mL':ml.toLocaleString(L(),{maximumFractionDigits:1})+' mL'};
+const cmpW=ml=>ml<1?'birkaç damla':ml<200?'≈ '+Math.max(1,Math.round(ml/20))+' yemek kaşığı':ml<1500?'≈ '+(ml/200).toLocaleString(L(),{maximumFractionDigits:1})+' su bardağı':ml<60000?'≈ '+Math.round(ml/500)+' pet şişe (0,5 L)':'≈ '+(ml/80000).toLocaleString(L(),{maximumFractionDigits:1})+' duş (8 dk)';
+const rngW=w=>w?fmtW(w.dusuk)+' – '+fmtW(w.yuksek):'';
+const DRINK=2000;   // çubuk ölçeği: bir yetişkinin günlük içme suyu (≈2 L)
+function paintWater(){
+  const w=ST.water;if(!w)return;const t=w.today||{},p=proj(),pw=p&&p.water;
+  $('#waterTxt').textContent=fmtW(t.orta);$('#waterBar').firstChild.style.width=Math.min(100,(t.orta||0)/DRINK*100)+'%';
+  $('#waterBtn').title=`Ajanların bugünkü tahmini su ayak izi: ${fmtW(t.orta)} (${cmpW(t.orta||0)}; aralık ${rngW(t)}).\nÇubuk: bir yetişkinin günlük içme suyuna (2 L) oranı.${pw?`\nBu proje: ${fmtW(pw.orta)}`:''}\nAyrıntı ve yöntem: Analiz sekmesi.`;
+}
+function waterHtml(){
+  const w=ST.water;if(!w)return'';const p=proj(),pw=p&&p.water,S_=w.scenarios||{};
+  const row=(l,x)=>`<div class="sv-row"><span>${l}</span><span class="sp"></span><b>${fmtW(x?.orta)}</b>&nbsp;<span class="wt-rng">${rngW(x)}</span></div>`;
+  const by=Object.entries(w.byCli||{}).sort((a,b)=>b[1].orta-a[1].orta),top=Math.max(.01,...by.map(([,v])=>v.orta));
+  const bars=by.map(([k,v])=>`<div class="bar"><span style="color:${who(k).color}">${esc(who(k).name)}</span><div class="bb"><i style="width:${v.orta/top*100}%;background:${who(k).color}"></i></div><small>${fmtW(v.orta)}</small></div>`).join('');
+  const head=pw?`<div class="wt-big">${fmtW(pw.orta)}<span>bu proje · ${cmpW(pw.orta)} · aralık ${rngW(pw)}</span></div>`:`<div class="wt-big">${fmtW(w.today?.orta)}<span>bugün · ${cmpW(w.today?.orta||0)}</span></div>`;
+  return`<div class="card sv"><div class="ch">Su ayak izi (tahmini)<span class="sp"></span></div>${head}
+    ${row('Bugün',w.today)}${row('Bu ay',w.month)}${row('Toplam',w.all)}
+    ${bars?'<div class="lbl2">Ajan başına (toplam)</div>'+bars:''}
+    <details class="sv-m"><summary>Yöntem ve kaynaklar</summary>
+      <p>Su = enerji × su yoğunluğu. Enerji, ajanların harcadığı tokenlardan tahmin edilir: çıktı tokenı pahalı, yeni girdi tokenı daha ucuz, önbellekten okunan girdi en ucuz. Şirketler model başına kesin rakam yayımlamadığı için kalın sayı "orta" senaryodur, yanında düşük–yüksek aralık yazar. Model eğitimi, senin bilgisayarın ve Codex'in görsel üretimi dahil değildir.</p>
+      <ul>${Object.values(S_).map(s=>`<li><b>${esc(s.label)}:</b> 1000 çıktı tokenı ${s.outWh} Wh, 1000 girdi ${s.inWh} Wh, 1000 önbellek ${s.cacheWh} Wh; ${s.mlPerWh} mL/Wh — ${esc(s.note)}</li>`).join('')}</ul>
+      <ul><li><a href="https://arxiv.org/abs/2508.15734" target="_blank" rel="noopener">Google 2025</a>: ortanca Gemini istemi 0,24 Wh, 0,26 mL su</li>
+      <li><a href="https://epoch.ai/gradient-updates/how-much-energy-does-chatgpt-use" target="_blank" rel="noopener">Epoch AI</a>: tipik sorgu ≈0,3 Wh; uzun akıl yürütmeli yanıtlar 10 kat ve üstü</li>
+      <li><a href="https://arxiv.org/abs/2304.03271" target="_blank" rel="noopener">Li ve ark. 2023</a>: elektrik üretimindeki su da sayılınca toplam birkaç kat artar</li>
+      <li>Mistral Large 2 yaşam döngüsü analizi (2025): 400 tokenlık yanıt 45 mL (donanım üretimi dahil en geniş kapsam)</li></ul></details></div>`;
+}
 const PROV_OPTS=[['auto','Otomatik — işe göre en iyisini seçer (önerilen)'],['claude','Claude Code'],['codex','Codex CLI (OpenAI)'],['antigravity','Antigravity CLI (Google)']];
 function providersHtml(){
   const P=ST.providers||[],RT=ST.routing||{};if(!P.length)return'';
@@ -802,7 +836,7 @@ function providersHtml(){
   const btns=x=>x.key==='claude'?'':x.login?`<button data-act="pdisc" data-k="${x.key}">Vazgeç</button>${x.login.url?`<button class="pri" data-act="popen" data-k="${x.key}">Onay sayfasını aç</button>`:''}`:!x.installed?`<button data-act="pchk" data-k="${x.key}" title="Kurduktan sonra yeniden denetle">↻ Denetle</button>`:x.usable?`<button data-act="pdisc" data-k="${x.key}">Bağlantıyı kes</button><button class="ghost" data-act="plogout" data-k="${x.key}" title="CLI'nin kendi girişini de sil">Çıkış yap</button>`:`<button class="pri" data-act="pconn" data-k="${x.key}" title="CLI'nin kendi girişi açılır; onayı tarayıcıda verirsin">Bağlan</button>`;
   const note=x=>x.key==='claude'?'<small class="stl">ana CLI · onay kutusu bağlı · üstteki CLI düğmesiyle kesilir</small>':x.login?`<small class="stl">${esc(x.login.text)}</small>`:!x.installed?`<small class="stl">Kurmak için terminalde: <code style="word-break:break-all">${esc(INST[x.key])}</code></small>`:'';
   const rows=P.map(x=>{const[c,t]=st(x),b=btns(x),inp=x.key!=='claude'&&x.installed?`<input data-pmodel="${x.key}" placeholder="model (boş = varsayılan)" value="${esc(x.model||'')}" title="model (boş = varsayılan)">`:'';
-    return`<div class="prv" title="${esc(x.src||'')}"><div class="prv-h"><b>${esc(x.label)}</b><span class="lp ${c}" style="white-space:nowrap">${esc(t)}</span></div>${note(x)}${inp||b?`<div class="prv-c">${inp}${b}</div>`:''}${x.key==='antigravity'&&x.installed?`<label class="stl prv-t" title="Komut çalıştırma izinlerini de sormadan verir (yine sandbox içinde). Kapalıyken sadece dosya düzenleyebilir, komutlar reddedilir."><input type="checkbox" data-ptrust ${x.trust?'checked':''}> tam yetki</label><div class="prv-c"><small class="stl">Ekran görüntüsü aracı: ${x.shotTool?'bağlı':'bağlı değil'}</small><button data-act="pshot" data-on="${x.shotTool?0:1}">${x.shotTool?'Kaldır':'Bağla'}</button></div>`:''}</div>`}).join('');
+    return`<div class="prv" title="${esc(x.src||'')}"><div class="prv-h"><b>${esc(x.label)}</b><span class="lp ${c}" style="white-space:nowrap">${esc(t)}</span></div>${note(x)}${inp||b?`<div class="prv-c">${inp}${b}</div>`:''}${x.key==='antigravity'&&x.installed?`<label class="stl prv-t" title="Komut çalıştırma izinlerini de sormadan verir (yine sandbox içinde). Kapalıyken sadece dosya düzenleyebilir, komutlar reddedilir."><input type="checkbox" data-ptrust ${x.trust?'checked':''}> tam yetki</label><div class="prv-c"><small class="stl">Ekran görüntüsü ve ekip araçları: ${x.shotTool?'bağlı':'bağlı değil'}</small><button data-act="pshot" data-on="${x.shotTool?0:1}">${x.shotTool?'Kaldır':'Bağla'}</button></div>`:''}${x.key==='codex'&&x.installed?`<label class="stl prv-t" title="Codex'in yerleşik web arama aracını açar; kabuk komutlarında ağ yine kapalı kalır. Açıkken web araştırması görevleri Codex'e de verilebilir (Claude limitini korur)."><input type="checkbox" data-pweb ${x.web?'checked':''}> web araması</label><label class="stl prv-t" title="${x.planAuth?'Codex yerleşik görsel üretimi (gpt-image-2). Ayrı ücret yok: ChatGPT aboneliğinin Codex limitinden düşer, ama metne göre 3-5 kat hızlı tüketir. API anahtarı hiçbir zaman kullanılmaz.':'Yalnızca Codex ChatGPT aboneliğiyle giriş yaptıysa açılır (API anahtarıyla girişte görseller ücretli API\'den faturalanır).'}"><input type="checkbox" data-pimg ${x.images&&x.planAuth?'checked':''} ${x.planAuth?'':'disabled'}> görsel üretimi${x.planAuth?'':' (ChatGPT girişi gerekli)'}</label>${x.planAuth?`<label class="stl prv-t" title="Bir projede üretilebilecek en fazla görsel (limitini korur)">proje başına en fazla <input type="number" min="1" max="30" data-pimgmax value="${x.imageMax||8}" style="width:3.5em"> görsel</label>`:''}`:''}</div>`}).join('');
   const cats=Object.entries(RT),keys=P.map(x=>x.key);
   const tbl=`<table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:6px"><tr><th style="text-align:left">İş türü</th>${P.map(x=>`<th>${esc(x.label.replace(/ CLI| Code/,''))}</th>`).join('')}</tr>${cats.map(([c,v])=>{const use=keys.filter(k=>P.find(x=>x.key===k).usable),best=use.sort((a,b)=>v.est[b].mean-v.est[a].mean)[0];
     return`<tr><td title="${esc(v.label)}">${esc(v.label)}</td>${keys.map(k=>{const e=v.est[k];return`<td style="text-align:center;white-space:nowrap;${k===best?'font-weight:700;color:var(--ok)':''}" title="ön bilgi ${e.prior}/10 · ${e.n} görev${e.fails?' · '+e.fails+' hata':''}">${e.mean.toFixed(1)}<small class="stl"> ${e.n?'('+(+e.n.toFixed(1))+')':'·'}</small></td>`}).join('')}</tr>`}).join('')}</table>`;
@@ -822,7 +856,7 @@ function renderAnalytics(){
   const m={};for(const r of R){m[r.agent]=(m[r.agent]||0)+r.tin+r.tout}const ag=Object.entries(m).sort((a,b)=>b[1]-a[1]),top=Math.max(1,...ag.map(x=>x[1]));
   const bars=ag.map(([k,t])=>`<div class="bar"><span style="color:${who(k).color}">${esc(ROLE[k]||who(k).name)}</span><div class="bb"><i style="width:${t/top*100}%;background:${who(k).color}"></i></div><small>${fmt(t)}</small></div>`).join('');
   const par=ST.settings?.parallel||ST.parallel;const rev=[0,1,2].includes(ST.settings?.review)?ST.settings.review:2;
-  $('#anal').innerHTML=limitHtml()+providersHtml()+savingsHtml()+`<div class="bigs">${big(fmt(tot),'toplam token')}${big(fmt(p.spent||0)+(p.budget?'<small> / '+fmt(p.budget)+'</small>':''),'bu proje')}${big(fmt(R.reduce((a,r)=>a+(r.tcache||0),0)),'önbellekten')}</div>
+  $('#anal').innerHTML=limitHtml()+providersHtml()+savingsHtml()+waterHtml()+`<div class="bigs">${big(fmt(tot),'toplam token')}${big(fmt(p.spent||0)+(p.budget?'<small> / '+fmt(p.budget)+'</small>':''),'bu proje')}${big(fmt(R.reduce((a,r)=>a+(r.tcache||0),0)),'önbellekten')}</div>
   <div class="card"><div class="row"><span>Aynı anda ajan</span><span class="sp"></span>${[1,2,3].map(n=>`<button data-act="par" data-n="${n}" class="seg${par==n?' pri':''}">${n}</button>`).join('')}</div>
   <div class="row"><span title="Ürün projelerinde: gözden geçirenler (tasarımcı, denetçi, bağlıysa Codex/Antigravity) ekran görüntülerine bakar, yapımcı süzüp uygular; tur sayısı kadar tekrarlanır. İçerik projelerinde: ekip toplantısı. Kalite artar, token harcaması da artar.">Ekip içi inceleme</span><span class="sp"></span>${[[0,'Kapalı'],[1,'1 tur'],[2,'2 tur']].map(([n,t])=>`<button data-act="rev" data-n="${n}" class="seg${rev===n?' pri':''}">${t}</button>`).join('')}</div>
   <div class="row"><span title="Ürün projelerinde yapımcı başlamadan önce 3 farklı görsel yönde yalnızca ilk ekran üretilir, ekran görüntülerine bakılıp ekip lideri en iyisini seçer; ürün o yönün üzerine kurulur. Daha özgün sonuç verir, bir ek çalıştırma kadar token harcar.">Yön keşfi</span><span class="sp"></span>${[[0,'Kapalı'],[1,'Açık']].map(([n,t])=>`<button data-act="explore" data-n="${n}" class="seg${!!ST.settings?.explore===!!n?' pri':''}">${t}</button>`).join('')}</div>
@@ -918,6 +952,7 @@ es.onmessage=ev=>{const {type,data}=JSON.parse(ev.data);if(!ST)return;
   else if(type==='sub'){const m=subs[data.agent]||(subs[data.agent]={});if(data.on)m[data.id]=data.text||1;else delete m[data.id];window.Office?.sub(data.agent,data.id,data.on,data.text);renderRoster()}
   else if(type==='celebrate'){if(data.id===cur)window.Office?.celebrate()}
   else if(type==='log'){(ST.log||(ST.log=[])).push(data);if(ST.log.length>500)ST.log.shift();if(tab==='log')renderLog()}
+  else if(type==='water'){const{project:pj,...w}=data;ST.water=w;if(pj){const q=ST.projects.find(x=>x.id===pj.id);if(q)q.water=pj.water}paintWater();if(tab==='anal')renderAnalytics()}
   else if(type==='budget'){const q=ST.projects.find(x=>x.id===data.id);if(q){q.spent=data.spent;q.budget=data.budget}if(data.id===cur){paintBudget(q);if(tab==='anal')renderAnalytics()}}
   else if(type==='usage'){ST.usage=data;renderTop();if(tab==='anal')renderAnalytics()}
   else if(type==='limits'){ST.limits=data;renderTop();if(tab==='anal')renderAnalytics()}
